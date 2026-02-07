@@ -1,72 +1,26 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import Header from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Users, Building2, Eye, EyeOff, Loader2 } from "lucide-react";
-import { useAuth } from "@/contexts/AuthContext";
-import { useToast } from "@/hooks/use-toast";
-import { emailSchema, passwordSchema } from "@/lib/validations";
+import { Users, Building2, Eye, EyeOff } from "lucide-react";
 
 const Login = () => {
-  const navigate = useNavigate();
-  const { signIn, profile } = useAuth();
-  const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<"employee" | "employer">("employee");
+  const { type } = useParams<{ type?: string }>();
+  const [activeTab, setActiveTab] = useState(type === "employer" ? "employer" : "employee");
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
-    email: "",
+    username: "",
     password: "",
   });
-  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const validateForm = () => {
-    const newErrors: Record<string, string> = {};
-    
-    const emailResult = emailSchema.safeParse(formData.email);
-    if (!emailResult.success) {
-      newErrors.email = emailResult.error.errors[0]?.message || "Invalid email";
-    }
-    
-    if (!formData.password) {
-      newErrors.password = "Password is required";
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!validateForm()) return;
-
-    setLoading(true);
-    const { error } = await signIn(formData.email, formData.password);
-
-    if (error) {
-      toast({
-        title: "Login Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-      setLoading(false);
-      return;
-    }
-
-    toast({
-      title: "Welcome back!",
-      description: "You have successfully logged in.",
-    });
-
-    // Redirect based on user type
-    const redirectPath = activeTab === "employee" ? "/employee/dashboard" : "/employer/dashboard";
-    navigate(redirectPath);
-    setLoading(false);
+    console.log("Login:", { type: activeTab, ...formData });
+    // Handle login
   };
 
   return (
@@ -83,7 +37,7 @@ const Login = () => {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "employee" | "employer")} className="w-full">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="grid w-full grid-cols-2 mb-6">
                   <TabsTrigger value="employee" className="flex items-center gap-2">
                     <Users className="w-4 h-4" />
@@ -98,16 +52,13 @@ const Login = () => {
                 <TabsContent value="employee">
                   <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-2">
-                      <Label htmlFor="email">Email</Label>
+                      <Label htmlFor="username">Username or Email</Label>
                       <Input
-                        id="email"
-                        type="email"
-                        placeholder="Enter your email"
-                        value={formData.email}
-                        onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                        className={errors.email ? "border-destructive" : ""}
+                        id="username"
+                        placeholder="Enter your username or email"
+                        value={formData.username}
+                        onChange={e => setFormData(prev => ({ ...prev, username: e.target.value }))}
                       />
-                      {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
                     </div>
 
                     <div className="space-y-2">
@@ -119,7 +70,6 @@ const Login = () => {
                           placeholder="Enter your password"
                           value={formData.password}
                           onChange={e => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                          className={errors.password ? "border-destructive" : ""}
                         />
                         <button
                           type="button"
@@ -129,7 +79,6 @@ const Login = () => {
                           {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
-                      {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
                     </div>
 
                     <div className="flex items-center justify-end">
@@ -138,15 +87,8 @@ const Login = () => {
                       </Link>
                     </div>
 
-                    <Button type="submit" variant="hero" className="w-full" disabled={loading}>
-                      {loading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Logging in...
-                        </>
-                      ) : (
-                        "Login as Employee"
-                      )}
+                    <Button type="submit" variant="hero" className="w-full">
+                      Login as Employee
                     </Button>
 
                     <p className="text-center text-sm text-muted-foreground">
@@ -161,16 +103,13 @@ const Login = () => {
                 <TabsContent value="employer">
                   <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-2">
-                      <Label htmlFor="email-emp">Email</Label>
+                      <Label htmlFor="username-emp">Username or Email</Label>
                       <Input
-                        id="email-emp"
-                        type="email"
-                        placeholder="Enter your email"
-                        value={formData.email}
-                        onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                        className={errors.email ? "border-destructive" : ""}
+                        id="username-emp"
+                        placeholder="Enter your username or email"
+                        value={formData.username}
+                        onChange={e => setFormData(prev => ({ ...prev, username: e.target.value }))}
                       />
-                      {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
                     </div>
 
                     <div className="space-y-2">
@@ -182,7 +121,6 @@ const Login = () => {
                           placeholder="Enter your password"
                           value={formData.password}
                           onChange={e => setFormData(prev => ({ ...prev, password: e.target.value }))}
-                          className={errors.password ? "border-destructive" : ""}
                         />
                         <button
                           type="button"
@@ -192,7 +130,6 @@ const Login = () => {
                           {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
-                      {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
                     </div>
 
                     <div className="flex items-center justify-end">
@@ -201,15 +138,8 @@ const Login = () => {
                       </Link>
                     </div>
 
-                    <Button type="submit" variant="accent" className="w-full" disabled={loading}>
-                      {loading ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Logging in...
-                        </>
-                      ) : (
-                        "Login as Employer"
-                      )}
+                    <Button type="submit" variant="accent" className="w-full">
+                      Login as Employer
                     </Button>
 
                     <p className="text-center text-sm text-muted-foreground">
