@@ -6,21 +6,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Users, Building2, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Users, Building2, Eye, EyeOff, Loader2, CheckCircle } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { emailSchema, passwordSchema } from "@/lib/validations";
 
-const Login = () => {
+const Signup = () => {
   const navigate = useNavigate();
-  const { signIn, profile } = useAuth();
+  const { signUp } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<"employee" | "employer">("employee");
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
+    confirmPassword: "",
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -32,8 +35,13 @@ const Login = () => {
       newErrors.email = emailResult.error.errors[0]?.message || "Invalid email";
     }
     
-    if (!formData.password) {
-      newErrors.password = "Password is required";
+    const passwordResult = passwordSchema.safeParse(formData.password);
+    if (!passwordResult.success) {
+      newErrors.password = passwordResult.error.errors[0]?.message || "Invalid password";
+    }
+
+    if (formData.password !== formData.confirmPassword) {
+      newErrors.confirmPassword = "Passwords don't match";
     }
 
     setErrors(newErrors);
@@ -46,11 +54,11 @@ const Login = () => {
     if (!validateForm()) return;
 
     setLoading(true);
-    const { error } = await signIn(formData.email, formData.password);
+    const { error } = await signUp(formData.email, formData.password, activeTab);
 
     if (error) {
       toast({
-        title: "Login Failed",
+        title: "Registration Failed",
         description: error.message,
         variant: "destructive",
       });
@@ -58,16 +66,32 @@ const Login = () => {
       return;
     }
 
-    toast({
-      title: "Welcome back!",
-      description: "You have successfully logged in.",
-    });
-
-    // Redirect based on user type
-    const redirectPath = activeTab === "employee" ? "/employee/dashboard" : "/employer/dashboard";
-    navigate(redirectPath);
+    setSuccess(true);
     setLoading(false);
   };
+
+  if (success) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <main className="pt-24 pb-12 flex items-center justify-center min-h-screen">
+          <Card className="max-w-md mx-auto text-center">
+            <CardContent className="pt-6">
+              <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold mb-2">Check Your Email!</h2>
+              <p className="text-muted-foreground mb-6">
+                We've sent a verification link to <strong>{formData.email}</strong>. 
+                Please click the link to verify your account.
+              </p>
+              <Button asChild variant="outline">
+                <Link to="/login">Back to Login</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -77,9 +101,9 @@ const Login = () => {
         <div className="container mx-auto px-4 max-w-md">
           <Card className="shadow-xl">
             <CardHeader className="text-center">
-              <CardTitle className="font-display text-2xl">Welcome Back</CardTitle>
+              <CardTitle className="font-display text-2xl">Create Account</CardTitle>
               <CardDescription>
-                Login to access your account
+                Join thousands of retail professionals
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -97,6 +121,10 @@ const Login = () => {
 
                 <TabsContent value="employee">
                   <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="p-3 bg-primary/10 rounded-lg text-sm text-primary mb-4">
+                      <strong>Free Registration!</strong> Create your profile and get discovered by top employers.
+                    </div>
+
                     <div className="space-y-2">
                       <Label htmlFor="email">Email</Label>
                       <Input
@@ -116,7 +144,7 @@ const Login = () => {
                         <Input
                           id="password"
                           type={showPassword ? "text" : "password"}
-                          placeholder="Enter your password"
+                          placeholder="Create a strong password"
                           value={formData.password}
                           onChange={e => setFormData(prev => ({ ...prev, password: e.target.value }))}
                           className={errors.password ? "border-destructive" : ""}
@@ -130,29 +158,48 @@ const Login = () => {
                         </button>
                       </div>
                       {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
+                      <p className="text-xs text-muted-foreground">
+                        Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char
+                      </p>
                     </div>
 
-                    <div className="flex items-center justify-end">
-                      <Link to="/forgot-password" className="text-sm text-primary hover:underline">
-                        Forgot password?
-                      </Link>
+                    <div className="space-y-2">
+                      <Label htmlFor="confirmPassword">Confirm Password</Label>
+                      <div className="relative">
+                        <Input
+                          id="confirmPassword"
+                          type={showConfirmPassword ? "text" : "password"}
+                          placeholder="Confirm your password"
+                          value={formData.confirmPassword}
+                          onChange={e => setFormData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                          className={errors.confirmPassword ? "border-destructive" : ""}
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        >
+                          {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      {errors.confirmPassword && <p className="text-sm text-destructive">{errors.confirmPassword}</p>}
                     </div>
 
                     <Button type="submit" variant="hero" className="w-full" disabled={loading}>
                       {loading ? (
                         <>
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Logging in...
+                          Creating account...
                         </>
                       ) : (
-                        "Login as Employee"
+                        "Create Employee Account"
                       )}
                     </Button>
 
                     <p className="text-center text-sm text-muted-foreground">
-                      Don't have an account?{" "}
-                      <Link to="/employee/register" className="text-primary hover:underline font-medium">
-                        Register here
+                      Already have an account?{" "}
+                      <Link to="/login" className="text-primary hover:underline font-medium">
+                        Login here
                       </Link>
                     </p>
                   </form>
@@ -160,12 +207,16 @@ const Login = () => {
 
                 <TabsContent value="employer">
                   <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="p-3 bg-accent/10 rounded-lg text-sm text-accent mb-4">
+                      <strong>₹5,000/year</strong> for unlimited access to verified candidates.
+                    </div>
+
                     <div className="space-y-2">
                       <Label htmlFor="email-emp">Email</Label>
                       <Input
                         id="email-emp"
                         type="email"
-                        placeholder="Enter your email"
+                        placeholder="Enter your business email"
                         value={formData.email}
                         onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
                         className={errors.email ? "border-destructive" : ""}
@@ -179,7 +230,7 @@ const Login = () => {
                         <Input
                           id="password-emp"
                           type={showPassword ? "text" : "password"}
-                          placeholder="Enter your password"
+                          placeholder="Create a strong password"
                           value={formData.password}
                           onChange={e => setFormData(prev => ({ ...prev, password: e.target.value }))}
                           className={errors.password ? "border-destructive" : ""}
@@ -195,27 +246,43 @@ const Login = () => {
                       {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
                     </div>
 
-                    <div className="flex items-center justify-end">
-                      <Link to="/forgot-password" className="text-sm text-accent hover:underline">
-                        Forgot password?
-                      </Link>
+                    <div className="space-y-2">
+                      <Label htmlFor="confirmPassword-emp">Confirm Password</Label>
+                      <div className="relative">
+                        <Input
+                          id="confirmPassword-emp"
+                          type={showConfirmPassword ? "text" : "password"}
+                          placeholder="Confirm your password"
+                          value={formData.confirmPassword}
+                          onChange={e => setFormData(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                          className={errors.confirmPassword ? "border-destructive" : ""}
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        >
+                          {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      {errors.confirmPassword && <p className="text-sm text-destructive">{errors.confirmPassword}</p>}
                     </div>
 
                     <Button type="submit" variant="accent" className="w-full" disabled={loading}>
                       {loading ? (
                         <>
                           <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Logging in...
+                          Creating account...
                         </>
                       ) : (
-                        "Login as Employer"
+                        "Create Employer Account"
                       )}
                     </Button>
 
                     <p className="text-center text-sm text-muted-foreground">
-                      Don't have an account?{" "}
-                      <Link to="/employer/register" className="text-accent hover:underline font-medium">
-                        Register here
+                      Already have an account?{" "}
+                      <Link to="/login" className="text-accent hover:underline font-medium">
+                        Login here
                       </Link>
                     </p>
                   </form>
@@ -229,4 +296,4 @@ const Login = () => {
   );
 };
 
-export default Login;
+export default Signup;
