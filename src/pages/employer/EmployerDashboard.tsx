@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import Header from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,79 +22,106 @@ import {
   Mail,
   Calendar,
   ArrowRight,
-  Eye
+  Eye,
+  Loader2,
+  Share2,
 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import SocialShareButtons from "@/components/shared/SocialShareButtons";
 
 const EmployerDashboard = () => {
-  // Mock company data
-  const company = {
-    name: "ABC Retail Pvt. Ltd.",
-    logo: null,
-    industry: "Supermarket",
-    location: "Mumbai, Maharashtra",
-    phone: "+91 98765 43210",
-    email: "hr@abcretail.com",
-    subscriptionExpiry: "Dec 31, 2024",
-    wallet: 15000,
+  const navigate = useNavigate();
+  const { user, profile, employerProfile, wallet, loading: authLoading } = useAuth();
+  const [reservedCandidates, setReservedCandidates] = useState<any[]>([]);
+  const [hiredCandidates, setHiredCandidates] = useState<any[]>([]);
+  const [tests, setTests] = useState<any[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
+
+  useEffect(() => {
+    if (user && employerProfile) {
+      fetchDashboardData();
+    }
+  }, [user, employerProfile]);
+
+  const fetchDashboardData = async () => {
+    if (!employerProfile) return;
+
+    try {
+      // Fetch reserved candidates
+      const { data: reservationsData } = await supabase
+        .from("candidate_reservations")
+        .select("*, employee_profiles(*)")
+        .eq("employer_id", employerProfile.id)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
+
+      setReservedCandidates(reservationsData || []);
+
+      // Fetch hired candidates
+      const { data: hiredData } = await supabase
+        .from("hired_candidates")
+        .select("*, employee_profiles(*)")
+        .eq("employer_id", employerProfile.id)
+        .order("hired_date", { ascending: false });
+
+      setHiredCandidates(hiredData || []);
+
+      // Fetch skill tests
+      const { data: testsData } = await supabase
+        .from("skill_tests")
+        .select("*")
+        .eq("employer_id", employerProfile.id)
+        .order("created_at", { ascending: false });
+
+      setTests(testsData || []);
+    } catch (error) {
+      console.error("Error fetching dashboard data:", error);
+    } finally {
+      setLoadingData(false);
+    }
   };
+
+  const handleHireDecision = async (reservationId: string, hired: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("candidate_reservations")
+        .update({
+          status: hired ? "hired" : "not_hired",
+          hired_at: hired ? new Date().toISOString() : null,
+        })
+        .eq("id", reservationId);
+
+      if (!error) {
+        fetchDashboardData();
+      }
+    } catch (error) {
+      console.error("Error updating reservation:", error);
+    }
+  };
+
+  if (authLoading || loadingData) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="pt-24 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-accent" />
+        </div>
+      </div>
+    );
+  }
 
   const stats = {
-    reserved: 3,
-    hired: 12,
-    testsCreated: 2,
-    activeTests: 1,
+    reserved: reservedCandidates.length,
+    hired: hiredCandidates.length,
+    testsCreated: tests.length,
+    activeTests: tests.filter((t) => t.status === "published").length,
   };
-
-  const reservedCandidates = [
-    { 
-      id: 1, 
-      skills: ["Cashier", "POS Systems"], 
-      experience: "2 years",
-      location: "Mumbai",
-      expiresIn: "3 days",
-      status: "pending"
-    },
-    { 
-      id: 2, 
-      skills: ["Sales", "Customer Service"], 
-      experience: "3 years",
-      location: "Thane",
-      expiresIn: "4 days",
-      status: "pending"
-    },
-    { 
-      id: 3, 
-      skills: ["Inventory", "Stock Management"], 
-      experience: "1 year",
-      location: "Navi Mumbai",
-      expiresIn: "2 days",
-      status: "pending"
-    },
-  ];
-
-  const hiredCandidates = [
-    { 
-      id: 1, 
-      name: "Rahul Sharma",
-      role: "Cashier",
-      hiredOn: "Jan 15, 2024",
-      rating: 4.5,
-      status: "active"
-    },
-    { 
-      id: 2, 
-      name: "Priya Patel",
-      role: "Sales Associate",
-      hiredOn: "Dec 20, 2023",
-      rating: 5,
-      status: "active"
-    },
-  ];
 
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      
+
       <main className="pt-24 pb-12">
         <div className="container mx-auto px-4">
           {/* Welcome Section */}
@@ -103,9 +130,7 @@ const EmployerDashboard = () => {
               <h1 className="font-display text-2xl md:text-3xl font-bold text-foreground mb-2">
                 Welcome back! 👋
               </h1>
-              <p className="text-muted-foreground">
-                Manage your hiring and find the perfect candidates
-              </p>
+              <p className="text-muted-foreground">Manage your hiring and find the perfect candidates</p>
             </div>
             <Button variant="hero" size="lg" asChild>
               <Link to="/employer/find-candidates">
@@ -122,30 +147,32 @@ const EmployerDashboard = () => {
               <Card>
                 <CardContent className="pt-6">
                   <div className="text-center">
-                    <div className="w-20 h-20 rounded-xl bg-accent/10 flex items-center justify-center mx-auto mb-4">
-                      <Building2 className="w-10 h-10 text-accent" />
-                    </div>
+                    {employerProfile?.logoUrl ? (
+                      <img
+                        src={employerProfile.logoUrl}
+                        alt="Company Logo"
+                        className="w-20 h-20 rounded-xl mx-auto mb-4 object-cover"
+                      />
+                    ) : (
+                      <div className="w-20 h-20 rounded-xl bg-accent/10 flex items-center justify-center mx-auto mb-4">
+                        <Building2 className="w-10 h-10 text-accent" />
+                      </div>
+                    )}
                     <h2 className="font-display font-semibold text-xl text-foreground mb-1">
-                      {company.name}
+                      {employerProfile?.organizationName || "Complete Your Profile"}
                     </h2>
-                    <Badge variant="outline" className="mb-4">{company.industry}</Badge>
-                    
+                    <Badge variant="outline" className="mb-4">
+                      {employerProfile?.subscriptionStatus || "Pending"}
+                    </Badge>
+
                     <div className="space-y-2 text-sm text-left mb-4">
                       <div className="flex items-center gap-2 text-muted-foreground">
-                        <MapPin className="w-4 h-4" />
-                        {company.location}
-                      </div>
-                      <div className="flex items-center gap-2 text-muted-foreground">
                         <Phone className="w-4 h-4" />
-                        {company.phone}
+                        {profile?.phone || "Add phone number"}
                       </div>
                       <div className="flex items-center gap-2 text-muted-foreground">
                         <Mail className="w-4 h-4" />
-                        {company.email}
-                      </div>
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Calendar className="w-4 h-4" />
-                        Subscription: {company.subscriptionExpiry}
+                        {profile?.email || "Add email"}
                       </div>
                     </div>
 
@@ -169,7 +196,7 @@ const EmployerDashboard = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-accent mb-4">
-                    ₹{company.wallet.toLocaleString()}
+                    ₹{(wallet?.balance || 0).toLocaleString()}
                   </div>
                   <Button variant="accent" className="w-full">
                     <Plus className="w-4 h-4 mr-2" />
@@ -196,6 +223,19 @@ const EmployerDashboard = () => {
                       View Test Results
                     </Link>
                   </Button>
+                </CardContent>
+              </Card>
+
+              {/* Social Share */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium flex items-center gap-2">
+                    <Share2 className="w-4 h-4" />
+                    Share & Attract Candidates
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <SocialShareButtons userType="employer" referralCode={profile?.referralCode} />
                 </CardContent>
               </Card>
             </div>
@@ -250,7 +290,7 @@ const EmployerDashboard = () => {
                         <Users className="w-5 h-5 text-accent" />
                       </div>
                       <div>
-                        <div className="text-2xl font-bold text-foreground">85</div>
+                        <div className="text-2xl font-bold text-foreground">0</div>
                         <p className="text-xs text-muted-foreground">Candidates</p>
                       </div>
                     </div>
@@ -275,40 +315,46 @@ const EmployerDashboard = () => {
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-lg">Reserved Candidates</CardTitle>
-                      <CardDescription>
-                        Update hiring status within the reservation period
-                      </CardDescription>
+                      <CardDescription>Update hiring status within the reservation period</CardDescription>
                     </CardHeader>
                     <CardContent>
                       {reservedCandidates.length > 0 ? (
                         <div className="space-y-4">
-                          {reservedCandidates.map((candidate) => (
-                            <div key={candidate.id} className="flex flex-col md:flex-row md:items-center justify-between p-4 border border-border rounded-lg gap-4">
+                          {reservedCandidates.map((reservation) => (
+                            <div
+                              key={reservation.id}
+                              className="flex flex-col md:flex-row md:items-center justify-between p-4 border border-border rounded-lg gap-4"
+                            >
                               <div className="flex-1">
                                 <div className="flex items-center gap-2 mb-2">
-                                  <span className="font-medium text-foreground">Candidate #{candidate.id}</span>
+                                  <span className="font-medium text-foreground">
+                                    {reservation.employee_profiles?.full_name || `Candidate`}
+                                  </span>
                                   <Badge variant="outline" className="text-warning border-warning">
                                     <Clock className="w-3 h-3 mr-1" />
-                                    {candidate.expiresIn}
+                                    {reservation.expires_at
+                                      ? `Expires ${new Date(reservation.expires_at).toLocaleDateString()}`
+                                      : "5 days"}
                                   </Badge>
                                 </div>
-                                <div className="flex flex-wrap gap-1 mb-2">
-                                  {candidate.skills.map((skill, index) => (
-                                    <Badge key={index} variant="secondary" className="text-xs">
-                                      {skill}
-                                    </Badge>
-                                  ))}
-                                </div>
                                 <p className="text-sm text-muted-foreground">
-                                  {candidate.experience} exp • {candidate.location}
+                                  Reserved on {new Date(reservation.created_at).toLocaleDateString()}
                                 </p>
                               </div>
                               <div className="flex gap-2">
-                                <Button variant="success" size="sm">
+                                <Button
+                                  variant="success"
+                                  size="sm"
+                                  onClick={() => handleHireDecision(reservation.id, true)}
+                                >
                                   <UserCheck className="w-4 h-4 mr-1" />
                                   Hired
                                 </Button>
-                                <Button variant="outline" size="sm">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleHireDecision(reservation.id, false)}
+                                >
                                   <UserX className="w-4 h-4 mr-1" />
                                   Not Hired
                                 </Button>
@@ -336,39 +382,45 @@ const EmployerDashboard = () => {
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-lg">Hired Candidates</CardTitle>
-                      <CardDescription>
-                        Manage your team and provide ratings
-                      </CardDescription>
+                      <CardDescription>Manage your team and provide ratings</CardDescription>
                     </CardHeader>
                     <CardContent>
                       {hiredCandidates.length > 0 ? (
                         <div className="space-y-4">
-                          {hiredCandidates.map((candidate) => (
-                            <div key={candidate.id} className="flex flex-col md:flex-row md:items-center justify-between p-4 border border-border rounded-lg gap-4">
+                          {hiredCandidates.map((hired) => (
+                            <div
+                              key={hired.id}
+                              className="flex flex-col md:flex-row md:items-center justify-between p-4 border border-border rounded-lg gap-4"
+                            >
                               <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 rounded-full bg-success/10 flex items-center justify-center">
                                   <UserCheck className="w-6 h-6 text-success" />
                                 </div>
                                 <div>
-                                  <p className="font-medium text-foreground">{candidate.name}</p>
-                                  <p className="text-sm text-muted-foreground">
-                                    {candidate.role} • Hired on {candidate.hiredOn}
+                                  <p className="font-medium text-foreground">
+                                    {hired.employee_profiles?.full_name || "Employee"}
                                   </p>
-                                  <div className="flex items-center gap-1 mt-1">
-                                    {[...Array(5)].map((_, i) => (
-                                      <Star
-                                        key={i}
-                                        className={`w-3 h-3 ${
-                                          i < Math.floor(candidate.rating)
-                                            ? "text-warning fill-warning"
-                                            : "text-muted-foreground"
-                                        }`}
-                                      />
-                                    ))}
-                                    <span className="text-xs text-muted-foreground ml-1">
-                                      ({candidate.rating})
-                                    </span>
-                                  </div>
+                                  <p className="text-sm text-muted-foreground">
+                                    {hired.position || "Position"} • Hired on{" "}
+                                    {new Date(hired.hired_date).toLocaleDateString()}
+                                  </p>
+                                  {hired.rating && (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      {[...Array(5)].map((_, i) => (
+                                        <Star
+                                          key={i}
+                                          className={`w-3 h-3 ${
+                                            i < Math.floor(hired.rating)
+                                              ? "text-warning fill-warning"
+                                              : "text-muted-foreground"
+                                          }`}
+                                        />
+                                      ))}
+                                      <span className="text-xs text-muted-foreground ml-1">
+                                        ({hired.rating})
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex gap-2">

@@ -11,6 +11,8 @@ interface UserProfile {
   phone?: string;
   phoneVerified: boolean;
   emailVerified: boolean;
+  username?: string;
+  referralCode?: string;
 }
 
 interface EmployeeProfile {
@@ -87,6 +89,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           phone: profileData.phone || undefined,
           phoneVerified: profileData.phone_verified || false,
           emailVerified: profileData.email_verified || false,
+          username: profileData.username || undefined,
+          referralCode: profileData.referral_code || undefined,
         });
 
         // Fetch type-specific profile
