@@ -26,10 +26,12 @@ import AuthCallback from "./pages/auth/AuthCallback";
 // Employee Pages
 import EmployeeRegister from "./pages/employee/EmployeeRegister";
 import EmployeeDashboard from "./pages/employee/EmployeeDashboard";
+import EmployeeProfileEdit from "./pages/employee/EmployeeProfileEdit";
 
 // Employer Pages
 import EmployerRegister from "./pages/employer/EmployerRegister";
 import EmployerDashboard from "./pages/employer/EmployerDashboard";
+import EmployerProfileEdit from "./pages/employer/EmployerProfileEdit";
 import FindCandidates from "./pages/employer/FindCandidates";
 import CreateTest from "./pages/employer/CreateTest";
 import ViewTests from "./pages/employer/ViewTests";
@@ -70,6 +72,22 @@ const App = () => (
               element={
                 <ProtectedRoute userType="employee">
                   <EmployeeDashboard />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/employee/profile/edit" 
+              element={
+                <ProtectedRoute userType="employee">
+                  <EmployeeProfileEdit />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/employer/profile/edit" 
+              element={
+                <ProtectedRoute userType="employer">
+                  <EmployerProfileEdit />
                 </ProtectedRoute>
               } 
             />

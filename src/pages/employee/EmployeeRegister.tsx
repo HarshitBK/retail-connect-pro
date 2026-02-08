@@ -1,29 +1,72 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import Header from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { 
-  User, 
-  Briefcase, 
-  FileText, 
-  CheckCircle2, 
-  ArrowRight, 
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  User,
+  Briefcase,
+  FileText,
+  CheckCircle2,
+  ArrowRight,
   ArrowLeft,
   Upload,
-  Info
+  Loader2,
+  Eye,
+  EyeOff,
 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { useIndianLocations } from "@/hooks/useIndianLocations";
+import WorkLocationSelector, { SelectedCity } from "@/components/shared/WorkLocationSelector";
+import RetailCategorySelector from "@/components/shared/RetailCategorySelector";
+import DocumentUpload from "@/components/shared/DocumentUpload";
+import {
+  phoneSchema,
+  emailSchema,
+  panSchema,
+  aadharSchema,
+  ifscSchema,
+  passwordSchema,
+  usernameSchema,
+  pincodeSchema,
+} from "@/lib/validations";
+import { SKILL_OPTIONS, EDUCATION_LEVELS, EXPERIENCE_LEVELS } from "@/lib/constants";
+import { supabase } from "@/integrations/supabase/client";
 
-type Step = "personal" | "professional" | "government" | "account";
+type Step = "personal" | "professional" | "documents" | "account";
 
 const EmployeeRegister = () => {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const referralCode = searchParams.get("ref") || "";
+  const { signUp } = useAuth();
+  const { toast } = useToast();
+  const { states, fetchCitiesByState } = useIndianLocations();
+
   const [currentStep, setCurrentStep] = useState<Step>("personal");
+  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Location states
+  const [selectedStateId, setSelectedStateId] = useState("");
+  const [availableCities, setAvailableCities] = useState<{ id: string; name: string }[]>([]);
+  const [loadingCities, setLoadingCities] = useState(false);
+
   const [formData, setFormData] = useState({
     // Personal
     fullName: "",
@@ -31,71 +74,172 @@ const EmployeeRegister = () => {
     phone: "",
     dateOfBirth: "",
     gender: "",
-    address: "",
-    city: "",
-    state: "",
+    addressLine1: "",
+    addressLine2: "",
+    stateId: "",
+    stateName: "",
+    cityId: "",
+    cityName: "",
     pincode: "",
     photo: null as File | null,
     // Education
-    highestEducation: "",
-    institution: "",
-    yearOfPassing: "",
+    educationLevel: "",
+    educationDetails: "",
     // Professional
-    totalExperience: "",
-    currentStatus: "",
+    yearsOfExperience: "",
+    currentOrganization: "",
     skills: [] as string[],
-    expectedSalary: "",
-    preferredLocations: "",
+    retailCategories: [] as string[],
+    preferredWorkCities: [] as SelectedCity[],
     resume: null as File | null,
-    // Experience entries
-    experiences: [{ company: "", role: "", duration: "", description: "" }],
-    certifications: "",
-    // Government
+    // Documents
     aadharNumber: "",
+    aadharDocument: null as File | null,
     panNumber: "",
+    panDocument: null as File | null,
     bankName: "",
-    accountNumber: "",
-    ifscCode: "",
+    bankAccountNumber: "",
+    bankIfsc: "",
     // Account
     username: "",
     password: "",
     confirmPassword: "",
+    referralCode: referralCode,
     agreeTerms: false,
   });
 
   const steps: { id: Step; label: string; icon: React.ElementType }[] = [
     { id: "personal", label: "Personal Details", icon: User },
     { id: "professional", label: "Professional", icon: Briefcase },
-    { id: "government", label: "Documents", icon: FileText },
+    { id: "documents", label: "Documents", icon: FileText },
     { id: "account", label: "Create Account", icon: CheckCircle2 },
   ];
 
-  const currentStepIndex = steps.findIndex(s => s.id === currentStep);
+  const currentStepIndex = steps.findIndex((s) => s.id === currentStep);
   const progress = ((currentStepIndex + 1) / steps.length) * 100;
 
-  const skillOptions = [
-    "Cash Handling", "Customer Service", "Inventory Management", "POS Systems",
-    "Sales", "Visual Merchandising", "Stock Management", "Team Leadership",
-    "Communication", "Problem Solving", "Time Management", "Computer Skills"
-  ];
-
   const handleInputChange = (field: string, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    // Clear error when user types
+    if (errors[field]) {
+      setErrors((prev) => ({ ...prev, [field]: "" }));
+    }
   };
 
-  const toggleSkill = (skill: string) => {
-    setFormData(prev => ({
+  const handleStateChange = async (stateId: string) => {
+    const state = states.find((s) => s.id === stateId);
+    if (!state) return;
+
+    setSelectedStateId(stateId);
+    setFormData((prev) => ({
       ...prev,
-      skills: prev.skills.includes(skill)
-        ? prev.skills.filter(s => s !== skill)
-        : [...prev.skills, skill]
+      stateId,
+      stateName: state.name,
+      cityId: "",
+      cityName: "",
+    }));
+
+    setLoadingCities(true);
+    const cities = await fetchCitiesByState(stateId);
+    setAvailableCities(cities.map((c) => ({ id: c.id, name: c.name })));
+    setLoadingCities(false);
+  };
+
+  const handleCityChange = (cityId: string) => {
+    const city = availableCities.find((c) => c.id === cityId);
+    if (!city) return;
+
+    setFormData((prev) => ({
+      ...prev,
+      cityId,
+      cityName: city.name,
     }));
   };
 
+  const toggleSkill = (skill: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      skills: prev.skills.includes(skill)
+        ? prev.skills.filter((s) => s !== skill)
+        : [...prev.skills, skill],
+    }));
+  };
+
+  const validateStep = (step: Step): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    if (step === "personal") {
+      if (!formData.fullName.trim()) newErrors.fullName = "Full name is required";
+      
+      const emailResult = emailSchema.safeParse(formData.email);
+      if (!emailResult.success) newErrors.email = emailResult.error.errors[0]?.message || "Invalid email";
+      
+      const phoneResult = phoneSchema.safeParse(formData.phone);
+      if (!phoneResult.success) newErrors.phone = phoneResult.error.errors[0]?.message || "Invalid phone";
+      
+      if (!formData.dateOfBirth) newErrors.dateOfBirth = "Date of birth is required";
+      if (!formData.gender) newErrors.gender = "Gender is required";
+      if (!formData.stateId) newErrors.stateId = "State is required";
+      if (!formData.cityId) newErrors.cityId = "City is required";
+      
+      if (formData.pincode) {
+        const pincodeResult = pincodeSchema.safeParse(formData.pincode);
+        if (!pincodeResult.success) newErrors.pincode = pincodeResult.error.errors[0]?.message || "Invalid pincode";
+      }
+    }
+
+    if (step === "professional") {
+      if (!formData.educationLevel) newErrors.educationLevel = "Education level is required";
+      if (formData.skills.length === 0) newErrors.skills = "Select at least one skill";
+      if (formData.retailCategories.length === 0) newErrors.retailCategories = "Select at least one retail category";
+      if (formData.preferredWorkCities.length === 0) newErrors.preferredWorkCities = "Select at least one preferred work city";
+    }
+
+    if (step === "documents") {
+      // Aadhar validation (optional for dry run)
+      if (formData.aadharNumber) {
+        const aadharResult = aadharSchema.safeParse(formData.aadharNumber);
+        if (!aadharResult.success) newErrors.aadharNumber = aadharResult.error.errors[0]?.message || "Invalid Aadhar";
+      }
+      
+      // PAN validation (optional for dry run)
+      if (formData.panNumber) {
+        const panResult = panSchema.safeParse(formData.panNumber);
+        if (!panResult.success) newErrors.panNumber = panResult.error.errors[0]?.message || "Invalid PAN";
+      }
+
+      // IFSC validation (optional)
+      if (formData.bankIfsc) {
+        const ifscResult = ifscSchema.safeParse(formData.bankIfsc);
+        if (!ifscResult.success) newErrors.bankIfsc = ifscResult.error.errors[0]?.message || "Invalid IFSC";
+      }
+    }
+
+    if (step === "account") {
+      const usernameResult = usernameSchema.safeParse(formData.username);
+      if (!usernameResult.success) newErrors.username = usernameResult.error.errors[0]?.message || "Invalid username";
+      
+      const passwordResult = passwordSchema.safeParse(formData.password);
+      if (!passwordResult.success) newErrors.password = passwordResult.error.errors[0]?.message || "Invalid password";
+      
+      if (formData.password !== formData.confirmPassword) {
+        newErrors.confirmPassword = "Passwords do not match";
+      }
+      
+      if (!formData.agreeTerms) newErrors.agreeTerms = "You must agree to the terms";
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const nextStep = () => {
+    if (!validateStep(currentStep)) return;
+
     const nextIndex = currentStepIndex + 1;
     if (nextIndex < steps.length) {
       setCurrentStep(steps[nextIndex].id);
+      window.scrollTo(0, 0);
     }
   };
 
@@ -103,18 +247,53 @@ const EmployeeRegister = () => {
     const prevIndex = currentStepIndex - 1;
     if (prevIndex >= 0) {
       setCurrentStep(steps[prevIndex].id);
+      window.scrollTo(0, 0);
     }
   };
 
-  const handleSubmit = () => {
-    console.log("Form submitted:", formData);
-    // Handle registration
+  const handleSubmit = async () => {
+    if (!validateStep("account")) return;
+
+    setLoading(true);
+
+    try {
+      // 1. Create auth user
+      const { error: signUpError } = await signUp(formData.email, formData.password, "employee");
+
+      if (signUpError) {
+        toast({
+          title: "Registration Failed",
+          description: signUpError.message,
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Note: Profile creation is handled in the signUp function
+      // Employee profile and other data will be created after email verification
+
+      toast({
+        title: "Registration Successful! 🎉",
+        description: "Please check your email to verify your account. You earned 10 bonus points!",
+      });
+
+      navigate("/login");
+    } catch (error: any) {
+      toast({
+        title: "Registration Failed",
+        description: error.message || "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      
+
       <main className="pt-24 pb-12">
         <div className="container mx-auto px-4 max-w-4xl">
           {/* Header */}
@@ -125,6 +304,11 @@ const EmployeeRegister = () => {
             <p className="text-muted-foreground">
               Register for free and get discovered by top employers
             </p>
+            {referralCode && (
+              <p className="text-sm text-primary mt-2">
+                🎁 Referred by code: <strong>{referralCode}</strong>
+              </p>
+            )}
           </div>
 
           {/* Progress Stepper */}
@@ -162,13 +346,11 @@ const EmployeeRegister = () => {
           {/* Form Card */}
           <Card className="shadow-lg">
             <CardHeader>
-              <CardTitle className="font-display">
-                {steps[currentStepIndex].label}
-              </CardTitle>
+              <CardTitle className="font-display">{steps[currentStepIndex].label}</CardTitle>
               <CardDescription>
-                {currentStep === "personal" && "Tell us about yourself - this helps employers know you better"}
+                {currentStep === "personal" && "Tell us about yourself"}
                 {currentStep === "professional" && "Share your work experience and skills"}
-                {currentStep === "government" && "Required for verification (optional fields marked)"}
+                {currentStep === "documents" && "Upload documents for verification (optional for now)"}
                 {currentStep === "account" && "Set up your login credentials"}
               </CardDescription>
             </CardHeader>
@@ -183,8 +365,10 @@ const EmployeeRegister = () => {
                         id="fullName"
                         placeholder="Enter your full name"
                         value={formData.fullName}
-                        onChange={e => handleInputChange("fullName", e.target.value)}
+                        onChange={(e) => handleInputChange("fullName", e.target.value)}
+                        className={errors.fullName ? "border-destructive" : ""}
                       />
+                      {errors.fullName && <p className="text-sm text-destructive">{errors.fullName}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="email">Email Address *</Label>
@@ -193,17 +377,22 @@ const EmployeeRegister = () => {
                         type="email"
                         placeholder="your@email.com"
                         value={formData.email}
-                        onChange={e => handleInputChange("email", e.target.value)}
+                        onChange={(e) => handleInputChange("email", e.target.value)}
+                        className={errors.email ? "border-destructive" : ""}
                       />
+                      {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="phone">Phone Number *</Label>
                       <Input
                         id="phone"
-                        placeholder="+91 98765 43210"
+                        placeholder="+91 9876543210"
                         value={formData.phone}
-                        onChange={e => handleInputChange("phone", e.target.value)}
+                        onChange={(e) => handleInputChange("phone", e.target.value)}
+                        className={errors.phone ? "border-destructive" : ""}
                       />
+                      {errors.phone && <p className="text-sm text-destructive">{errors.phone}</p>}
+                      <p className="text-xs text-muted-foreground">Format: +91 followed by 10 digits</p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="dob">Date of Birth *</Label>
@@ -211,13 +400,15 @@ const EmployeeRegister = () => {
                         id="dob"
                         type="date"
                         value={formData.dateOfBirth}
-                        onChange={e => handleInputChange("dateOfBirth", e.target.value)}
+                        onChange={(e) => handleInputChange("dateOfBirth", e.target.value)}
+                        className={errors.dateOfBirth ? "border-destructive" : ""}
                       />
+                      {errors.dateOfBirth && <p className="text-sm text-destructive">{errors.dateOfBirth}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="gender">Gender *</Label>
-                      <Select value={formData.gender} onValueChange={v => handleInputChange("gender", v)}>
-                        <SelectTrigger>
+                      <Select value={formData.gender} onValueChange={(v) => handleInputChange("gender", v)}>
+                        <SelectTrigger className={errors.gender ? "border-destructive" : ""}>
                           <SelectValue placeholder="Select gender" />
                         </SelectTrigger>
                         <SelectContent>
@@ -226,99 +417,134 @@ const EmployeeRegister = () => {
                           <SelectItem value="other">Other</SelectItem>
                         </SelectContent>
                       </Select>
+                      {errors.gender && <p className="text-sm text-destructive">{errors.gender}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="photo">Profile Photo</Label>
-                      <div className="flex items-center gap-2">
+                      <Input
+                        id="photo"
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleInputChange("photo", e.target.files?.[0] || null)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Address Section */}
+                  <div className="border-t pt-6">
+                    <h4 className="font-semibold text-foreground mb-4">Current Address</h4>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="addressLine1">Address Line 1</Label>
                         <Input
-                          id="photo"
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={e => handleInputChange("photo", e.target.files?.[0] || null)}
+                          id="addressLine1"
+                          placeholder="House/Flat number, Building name"
+                          value={formData.addressLine1}
+                          onChange={(e) => handleInputChange("addressLine1", e.target.value)}
                         />
-                        <Button variant="outline" className="w-full" onClick={() => document.getElementById("photo")?.click()}>
-                          <Upload className="w-4 h-4 mr-2" />
-                          Upload Photo
-                        </Button>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="addressLine2">Address Line 2</Label>
+                        <Input
+                          id="addressLine2"
+                          placeholder="Street, Locality"
+                          value={formData.addressLine2}
+                          onChange={(e) => handleInputChange("addressLine2", e.target.value)}
+                        />
+                      </div>
+                      <div className="grid md:grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label>State *</Label>
+                          <Select value={formData.stateId} onValueChange={handleStateChange}>
+                            <SelectTrigger className={errors.stateId ? "border-destructive" : ""}>
+                              <SelectValue placeholder="Select state" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <ScrollArea className="h-60">
+                                {states.map((state) => (
+                                  <SelectItem key={state.id} value={state.id}>
+                                    {state.name}
+                                  </SelectItem>
+                                ))}
+                              </ScrollArea>
+                            </SelectContent>
+                          </Select>
+                          {errors.stateId && <p className="text-sm text-destructive">{errors.stateId}</p>}
+                        </div>
+                        <div className="space-y-2">
+                          <Label>City *</Label>
+                          <Select
+                            value={formData.cityId}
+                            onValueChange={handleCityChange}
+                            disabled={!formData.stateId || loadingCities}
+                          >
+                            <SelectTrigger className={errors.cityId ? "border-destructive" : ""}>
+                              <SelectValue
+                                placeholder={
+                                  loadingCities
+                                    ? "Loading..."
+                                    : !formData.stateId
+                                    ? "Select state first"
+                                    : "Select city"
+                                }
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <ScrollArea className="h-60">
+                                {availableCities.map((city) => (
+                                  <SelectItem key={city.id} value={city.id}>
+                                    {city.name}
+                                  </SelectItem>
+                                ))}
+                              </ScrollArea>
+                            </SelectContent>
+                          </Select>
+                          {errors.cityId && <p className="text-sm text-destructive">{errors.cityId}</p>}
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="pincode">Pincode</Label>
+                          <Input
+                            id="pincode"
+                            placeholder="560001"
+                            value={formData.pincode}
+                            onChange={(e) => handleInputChange("pincode", e.target.value)}
+                            className={errors.pincode ? "border-destructive" : ""}
+                          />
+                          {errors.pincode && <p className="text-sm text-destructive">{errors.pincode}</p>}
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="address">Address *</Label>
-                    <Textarea
-                      id="address"
-                      placeholder="Enter your full address"
-                      value={formData.address}
-                      onChange={e => handleInputChange("address", e.target.value)}
-                    />
-                  </div>
-
-                  <div className="grid md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="city">City *</Label>
-                      <Input
-                        id="city"
-                        placeholder="City"
-                        value={formData.city}
-                        onChange={e => handleInputChange("city", e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="state">State *</Label>
-                      <Input
-                        id="state"
-                        placeholder="State"
-                        value={formData.state}
-                        onChange={e => handleInputChange("state", e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="pincode">Pincode *</Label>
-                      <Input
-                        id="pincode"
-                        placeholder="Pincode"
-                        value={formData.pincode}
-                        onChange={e => handleInputChange("pincode", e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="border-t border-border pt-6">
+                  {/* Education Section */}
+                  <div className="border-t pt-6">
                     <h4 className="font-semibold text-foreground mb-4">Education Details</h4>
-                    <div className="grid md:grid-cols-3 gap-4">
+                    <div className="grid md:grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="education">Highest Education *</Label>
-                        <Select value={formData.highestEducation} onValueChange={v => handleInputChange("highestEducation", v)}>
+                        <Label>Highest Education *</Label>
+                        <Select
+                          value={formData.educationLevel}
+                          onValueChange={(v) => handleInputChange("educationLevel", v)}
+                        >
                           <SelectTrigger>
-                            <SelectValue placeholder="Select" />
+                            <SelectValue placeholder="Select education level" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="10th">10th Pass</SelectItem>
-                            <SelectItem value="12th">12th Pass</SelectItem>
-                            <SelectItem value="graduate">Graduate</SelectItem>
-                            <SelectItem value="postgraduate">Post Graduate</SelectItem>
-                            <SelectItem value="diploma">Diploma</SelectItem>
+                            {EDUCATION_LEVELS.map((level) => (
+                              <SelectItem key={level.value} value={level.value}>
+                                {level.label}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="institution">Institution Name</Label>
+                        <Label htmlFor="educationDetails">Institution/Details</Label>
                         <Input
-                          id="institution"
+                          id="educationDetails"
                           placeholder="School/College name"
-                          value={formData.institution}
-                          onChange={e => handleInputChange("institution", e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="yearOfPassing">Year of Passing</Label>
-                        <Input
-                          id="yearOfPassing"
-                          placeholder="2020"
-                          value={formData.yearOfPassing}
-                          onChange={e => handleInputChange("yearOfPassing", e.target.value)}
+                          value={formData.educationDetails}
+                          onChange={(e) => handleInputChange("educationDetails", e.target.value)}
                         />
                       </div>
                     </div>
@@ -331,58 +557,40 @@ const EmployeeRegister = () => {
                 <div className="space-y-6">
                   <div className="grid md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="experience">Total Experience *</Label>
-                      <Select value={formData.totalExperience} onValueChange={v => handleInputChange("totalExperience", v)}>
+                      <Label>Total Experience</Label>
+                      <Select
+                        value={formData.yearsOfExperience}
+                        onValueChange={(v) => handleInputChange("yearsOfExperience", v)}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="Select experience" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="fresher">Fresher</SelectItem>
-                          <SelectItem value="0-1">0-1 Years</SelectItem>
-                          <SelectItem value="1-2">1-2 Years</SelectItem>
-                          <SelectItem value="2-5">2-5 Years</SelectItem>
-                          <SelectItem value="5+">5+ Years</SelectItem>
+                          {EXPERIENCE_LEVELS.map((level) => (
+                            <SelectItem key={level.value} value={level.value}>
+                              {level.label}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="status">Current Status *</Label>
-                      <Select value={formData.currentStatus} onValueChange={v => handleInputChange("currentStatus", v)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="available">Available for Work</SelectItem>
-                          <SelectItem value="employed">Currently Employed</SelectItem>
-                          <SelectItem value="notice">In Notice Period</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="salary">Expected Salary (Monthly)</Label>
+                      <Label htmlFor="currentOrg">Current Organization</Label>
                       <Input
-                        id="salary"
-                        placeholder="₹ 15,000"
-                        value={formData.expectedSalary}
-                        onChange={e => handleInputChange("expectedSalary", e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="locations">Preferred Locations</Label>
-                      <Input
-                        id="locations"
-                        placeholder="Mumbai, Pune, Delhi"
-                        value={formData.preferredLocations}
-                        onChange={e => handleInputChange("preferredLocations", e.target.value)}
+                        id="currentOrg"
+                        placeholder="Company name (if employed)"
+                        value={formData.currentOrganization}
+                        onChange={(e) => handleInputChange("currentOrganization", e.target.value)}
                       />
                     </div>
                   </div>
 
+                  {/* Skills */}
                   <div className="space-y-2">
                     <Label>Skills *</Label>
                     <p className="text-sm text-muted-foreground mb-2">Select all that apply</p>
                     <div className="flex flex-wrap gap-2">
-                      {skillOptions.map(skill => (
+                      {SKILL_OPTIONS.map((skill) => (
                         <button
                           key={skill}
                           type="button"
@@ -397,76 +605,101 @@ const EmployeeRegister = () => {
                         </button>
                       ))}
                     </div>
+                    {errors.skills && <p className="text-sm text-destructive">{errors.skills}</p>}
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="resume">Upload Resume/CV</Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        id="resume"
-                        type="file"
-                        accept=".pdf,.doc,.docx"
-                        className="hidden"
-                        onChange={e => handleInputChange("resume", e.target.files?.[0] || null)}
-                      />
-                      <Button variant="outline" className="w-full" onClick={() => document.getElementById("resume")?.click()}>
-                        <Upload className="w-4 h-4 mr-2" />
-                        Upload Resume (PDF, DOC)
-                      </Button>
-                    </div>
-                  </div>
+                  {/* Retail Categories */}
+                  <RetailCategorySelector
+                    selectedCategories={formData.retailCategories}
+                    onChange={(cats) => handleInputChange("retailCategories", cats)}
+                    maxCategories={5}
+                  />
+                  {errors.retailCategories && (
+                    <p className="text-sm text-destructive">{errors.retailCategories}</p>
+                  )}
 
-                  <div className="space-y-2">
-                    <Label htmlFor="certifications">Certifications (Optional)</Label>
-                    <Textarea
-                      id="certifications"
-                      placeholder="List any relevant certifications..."
-                      value={formData.certifications}
-                      onChange={e => handleInputChange("certifications", e.target.value)}
-                    />
-                  </div>
+                  {/* Preferred Work Locations */}
+                  <WorkLocationSelector
+                    selectedCities={formData.preferredWorkCities}
+                    onChange={(cities) => handleInputChange("preferredWorkCities", cities)}
+                    maxCities={5}
+                  />
+                  {errors.preferredWorkCities && (
+                    <p className="text-sm text-destructive">{errors.preferredWorkCities}</p>
+                  )}
 
-                  <div className="bg-accent/10 rounded-lg p-4 flex items-start gap-3">
-                    <Info className="w-5 h-5 text-accent mt-0.5" />
-                    <p className="text-sm text-foreground">
-                      <strong>Tip:</strong> The more details you provide, the better your chances of getting noticed by employers. Complete profiles get 3x more views!
-                    </p>
-                  </div>
+                  {/* Resume Upload */}
+                  <DocumentUpload
+                    label="Upload Resume/CV"
+                    accept=".pdf,.doc,.docx"
+                    value={formData.resume}
+                    onChange={(file) => handleInputChange("resume", file)}
+                    helpText="PDF or Word document (Max 5MB)"
+                  />
                 </div>
               )}
 
-              {/* Government Documents Step */}
-              {currentStep === "government" && (
+              {/* Documents Step */}
+              {currentStep === "documents" && (
                 <div className="space-y-6">
-                  <div className="bg-warning/10 rounded-lg p-4 flex items-start gap-3 mb-6">
-                    <Info className="w-5 h-5 text-warning mt-0.5" />
+                  <div className="bg-primary/10 rounded-lg p-4 mb-6">
                     <p className="text-sm text-foreground">
-                      These documents help verify your identity and are required for employment. They are stored securely and only shared with employers after hiring.
+                      📝 Documents are optional during registration. You can complete them later from your dashboard. 
+                      For testing, you can skip document uploads.
                     </p>
                   </div>
 
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="aadhar">Aadhar Number</Label>
-                      <Input
-                        id="aadhar"
-                        placeholder="XXXX XXXX XXXX"
-                        value={formData.aadharNumber}
-                        onChange={e => handleInputChange("aadharNumber", e.target.value)}
+                  <div className="grid md:grid-cols-2 gap-6">
+                    {/* Aadhar */}
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="aadhar">Aadhar Number</Label>
+                        <Input
+                          id="aadhar"
+                          placeholder="1234 5678 9012"
+                          value={formData.aadharNumber}
+                          onChange={(e) => handleInputChange("aadharNumber", e.target.value)}
+                          className={errors.aadharNumber ? "border-destructive" : ""}
+                        />
+                        {errors.aadharNumber && (
+                          <p className="text-sm text-destructive">{errors.aadharNumber}</p>
+                        )}
+                        <p className="text-xs text-muted-foreground">12 digits only</p>
+                      </div>
+                      <DocumentUpload
+                        label="Upload Aadhar Card"
+                        value={formData.aadharDocument}
+                        onChange={(file) => handleInputChange("aadharDocument", file)}
+                        helpText="Front and back in one file"
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="pan">PAN Number</Label>
-                      <Input
-                        id="pan"
-                        placeholder="ABCDE1234F"
-                        value={formData.panNumber}
-                        onChange={e => handleInputChange("panNumber", e.target.value)}
+
+                    {/* PAN */}
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="pan">PAN Number</Label>
+                        <Input
+                          id="pan"
+                          placeholder="ABCDE1234F"
+                          value={formData.panNumber}
+                          onChange={(e) => handleInputChange("panNumber", e.target.value.toUpperCase())}
+                          className={errors.panNumber ? "border-destructive" : ""}
+                        />
+                        {errors.panNumber && (
+                          <p className="text-sm text-destructive">{errors.panNumber}</p>
+                        )}
+                        <p className="text-xs text-muted-foreground">Format: 5 letters + 4 digits + 1 letter</p>
+                      </div>
+                      <DocumentUpload
+                        label="Upload PAN Card"
+                        value={formData.panDocument}
+                        onChange={(file) => handleInputChange("panDocument", file)}
                       />
                     </div>
                   </div>
 
-                  <div className="border-t border-border pt-6">
+                  {/* Bank Details */}
+                  <div className="border-t pt-6">
                     <h4 className="font-semibold text-foreground mb-4">Bank Details (Optional)</h4>
                     <div className="grid md:grid-cols-3 gap-4">
                       <div className="space-y-2">
@@ -475,7 +708,7 @@ const EmployeeRegister = () => {
                           id="bankName"
                           placeholder="Bank name"
                           value={formData.bankName}
-                          onChange={e => handleInputChange("bankName", e.target.value)}
+                          onChange={(e) => handleInputChange("bankName", e.target.value)}
                         />
                       </div>
                       <div className="space-y-2">
@@ -483,46 +716,68 @@ const EmployeeRegister = () => {
                         <Input
                           id="accountNumber"
                           placeholder="Account number"
-                          value={formData.accountNumber}
-                          onChange={e => handleInputChange("accountNumber", e.target.value)}
+                          value={formData.bankAccountNumber}
+                          onChange={(e) => handleInputChange("bankAccountNumber", e.target.value)}
                         />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="ifsc">IFSC Code</Label>
                         <Input
                           id="ifsc"
-                          placeholder="IFSC code"
-                          value={formData.ifscCode}
-                          onChange={e => handleInputChange("ifscCode", e.target.value)}
+                          placeholder="SBIN0001234"
+                          value={formData.bankIfsc}
+                          onChange={(e) => handleInputChange("bankIfsc", e.target.value.toUpperCase())}
+                          className={errors.bankIfsc ? "border-destructive" : ""}
                         />
+                        {errors.bankIfsc && <p className="text-sm text-destructive">{errors.bankIfsc}</p>}
                       </div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Account Creation Step */}
+              {/* Account Step */}
               {currentStep === "account" && (
                 <div className="space-y-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="username">Username *</Label>
+                    <Input
+                      id="username"
+                      placeholder="Choose a unique username"
+                      value={formData.username}
+                      onChange={(e) => handleInputChange("username", e.target.value.toLowerCase())}
+                      className={errors.username ? "border-destructive" : ""}
+                    />
+                    {errors.username && <p className="text-sm text-destructive">{errors.username}</p>}
+                    <p className="text-xs text-muted-foreground">
+                      3-20 characters, letters, numbers, underscores only
+                    </p>
+                  </div>
+
                   <div className="grid md:grid-cols-2 gap-4">
-                    <div className="space-y-2 md:col-span-2">
-                      <Label htmlFor="username">Username *</Label>
-                      <Input
-                        id="username"
-                        placeholder="Choose a username"
-                        value={formData.username}
-                        onChange={e => handleInputChange("username", e.target.value)}
-                      />
-                    </div>
                     <div className="space-y-2">
                       <Label htmlFor="password">Password *</Label>
-                      <Input
-                        id="password"
-                        type="password"
-                        placeholder="Create a strong password"
-                        value={formData.password}
-                        onChange={e => handleInputChange("password", e.target.value)}
-                      />
+                      <div className="relative">
+                        <Input
+                          id="password"
+                          type={showPassword ? "text" : "password"}
+                          placeholder="Create a strong password"
+                          value={formData.password}
+                          onChange={(e) => handleInputChange("password", e.target.value)}
+                          className={errors.password ? "border-destructive" : ""}
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          onClick={() => setShowPassword(!showPassword)}
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
+                      <p className="text-xs text-muted-foreground">
+                        Min 8 characters with uppercase, lowercase, and number
+                      </p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="confirmPassword">Confirm Password *</Label>
@@ -531,18 +786,35 @@ const EmployeeRegister = () => {
                         type="password"
                         placeholder="Confirm your password"
                         value={formData.confirmPassword}
-                        onChange={e => handleInputChange("confirmPassword", e.target.value)}
+                        onChange={(e) => handleInputChange("confirmPassword", e.target.value)}
+                        className={errors.confirmPassword ? "border-destructive" : ""}
                       />
+                      {errors.confirmPassword && (
+                        <p className="text-sm text-destructive">{errors.confirmPassword}</p>
+                      )}
                     </div>
                   </div>
 
-                  <div className="flex items-start gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="referralCode">Referral Code (Optional)</Label>
+                    <Input
+                      id="referralCode"
+                      placeholder="Enter referral code if you have one"
+                      value={formData.referralCode}
+                      onChange={(e) => handleInputChange("referralCode", e.target.value.toUpperCase())}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Both you and your referrer will earn bonus points!
+                    </p>
+                  </div>
+
+                  <div className="flex items-start space-x-2">
                     <Checkbox
                       id="terms"
                       checked={formData.agreeTerms}
-                      onCheckedChange={checked => handleInputChange("agreeTerms", checked)}
+                      onCheckedChange={(checked) => handleInputChange("agreeTerms", checked)}
                     />
-                    <Label htmlFor="terms" className="text-sm text-muted-foreground leading-relaxed cursor-pointer">
+                    <label htmlFor="terms" className="text-sm text-muted-foreground leading-tight">
                       I agree to the{" "}
                       <Link to="/terms" className="text-primary hover:underline">
                         Terms of Service
@@ -551,50 +823,60 @@ const EmployeeRegister = () => {
                       <Link to="/privacy" className="text-primary hover:underline">
                         Privacy Policy
                       </Link>
-                    </Label>
+                    </label>
                   </div>
+                  {errors.agreeTerms && <p className="text-sm text-destructive">{errors.agreeTerms}</p>}
 
-                  <div className="bg-success/10 rounded-lg p-4">
-                    <h4 className="font-semibold text-foreground mb-2">🎉 Almost there!</h4>
-                    <p className="text-sm text-muted-foreground">
-                      You'll receive <strong>10 bonus points</strong> upon registration. Earn more points by completing tests and certifications!
+                  <div className="bg-success/10 border border-success/30 rounded-lg p-4">
+                    <p className="text-sm text-foreground">
+                      🎁 <strong>Registration Bonus:</strong> You'll receive 10 reward points upon successful registration!
                     </p>
                   </div>
                 </div>
               )}
 
               {/* Navigation Buttons */}
-              <div className="flex justify-between mt-8 pt-6 border-t border-border">
-                <Button
-                  variant="outline"
-                  onClick={prevStep}
-                  disabled={currentStepIndex === 0}
-                >
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Previous
-                </Button>
+              <div className="flex justify-between mt-8 pt-6 border-t">
+                {currentStepIndex > 0 ? (
+                  <Button type="button" variant="outline" onClick={prevStep}>
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Previous
+                  </Button>
+                ) : (
+                  <div />
+                )}
 
                 {currentStepIndex < steps.length - 1 ? (
-                  <Button variant="gradient" onClick={nextStep}>
-                    Next Step
+                  <Button type="button" variant="hero" onClick={nextStep}>
+                    Continue
                     <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
                 ) : (
-                  <Button variant="hero" onClick={handleSubmit} disabled={!formData.agreeTerms}>
-                    Create Account
-                    <CheckCircle2 className="w-4 h-4 ml-2" />
+                  <Button type="button" variant="hero" onClick={handleSubmit} disabled={loading}>
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Creating Account...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 mr-2" />
+                        Create Account
+                      </>
+                    )}
                   </Button>
                 )}
               </div>
+
+              {/* Login Link */}
+              <p className="text-center text-sm text-muted-foreground mt-6">
+                Already have an account?{" "}
+                <Link to="/login" className="text-primary hover:underline font-medium">
+                  Login here
+                </Link>
+              </p>
             </CardContent>
           </Card>
-
-          <p className="text-center text-sm text-muted-foreground mt-6">
-            Already have an account?{" "}
-            <Link to="/employee/login" className="text-primary hover:underline font-medium">
-              Login here
-            </Link>
-          </p>
         </div>
       </main>
     </div>

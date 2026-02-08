@@ -178,6 +178,7 @@ export type Database = {
       }
       employee_profiles: {
         Row: {
+          aadhar_document_url: string | null
           aadhar_number: string | null
           address_line1: string | null
           address_line2: string | null
@@ -198,6 +199,7 @@ export type Database = {
           gender: string | null
           id: string
           is_blacklisted: boolean | null
+          pan_document_url: string | null
           pan_number: string | null
           payslips_urls: Json | null
           photo_url: string | null
@@ -208,6 +210,7 @@ export type Database = {
           reservation_expires_at: string | null
           reserved_by: string | null
           resume_url: string | null
+          retail_categories: Json | null
           skills: Json | null
           state: string | null
           updated_at: string | null
@@ -215,6 +218,7 @@ export type Database = {
           years_of_experience: number | null
         }
         Insert: {
+          aadhar_document_url?: string | null
           aadhar_number?: string | null
           address_line1?: string | null
           address_line2?: string | null
@@ -235,6 +239,7 @@ export type Database = {
           gender?: string | null
           id?: string
           is_blacklisted?: boolean | null
+          pan_document_url?: string | null
           pan_number?: string | null
           payslips_urls?: Json | null
           photo_url?: string | null
@@ -245,6 +250,7 @@ export type Database = {
           reservation_expires_at?: string | null
           reserved_by?: string | null
           resume_url?: string | null
+          retail_categories?: Json | null
           skills?: Json | null
           state?: string | null
           updated_at?: string | null
@@ -252,6 +258,7 @@ export type Database = {
           years_of_experience?: number | null
         }
         Update: {
+          aadhar_document_url?: string | null
           aadhar_number?: string | null
           address_line1?: string | null
           address_line2?: string | null
@@ -272,6 +279,7 @@ export type Database = {
           gender?: string | null
           id?: string
           is_blacklisted?: boolean | null
+          pan_document_url?: string | null
           pan_number?: string | null
           payslips_urls?: Json | null
           photo_url?: string | null
@@ -282,6 +290,7 @@ export type Database = {
           reservation_expires_at?: string | null
           reserved_by?: string | null
           resume_url?: string | null
+          retail_categories?: Json | null
           skills?: Json | null
           state?: string | null
           updated_at?: string | null
@@ -304,10 +313,12 @@ export type Database = {
           gst_number: string | null
           id: string
           logo_url: string | null
+          number_of_stores: number | null
           organization_name: string
           organization_type: string | null
           pan_number: string | null
           pincode: string | null
+          retail_categories: Json | null
           state: string | null
           subscription_expires_at: string | null
           subscription_status: string | null
@@ -328,10 +339,12 @@ export type Database = {
           gst_number?: string | null
           id?: string
           logo_url?: string | null
+          number_of_stores?: number | null
           organization_name: string
           organization_type?: string | null
           pan_number?: string | null
           pincode?: string | null
+          retail_categories?: Json | null
           state?: string | null
           subscription_expires_at?: string | null
           subscription_status?: string | null
@@ -352,10 +365,12 @@ export type Database = {
           gst_number?: string | null
           id?: string
           logo_url?: string | null
+          number_of_stores?: number | null
           organization_name?: string
           organization_type?: string | null
           pan_number?: string | null
           pincode?: string | null
+          retail_categories?: Json | null
           state?: string | null
           subscription_expires_at?: string | null
           subscription_status?: string | null
@@ -591,8 +606,11 @@ export type Database = {
           id: string
           phone: string | null
           phone_verified: boolean | null
+          referral_code: string | null
+          referred_by: string | null
           updated_at: string | null
           user_type: Database["public"]["Enums"]["user_type"]
+          username: string | null
         }
         Insert: {
           created_at?: string | null
@@ -601,8 +619,11 @@ export type Database = {
           id: string
           phone?: string | null
           phone_verified?: boolean | null
+          referral_code?: string | null
+          referred_by?: string | null
           updated_at?: string | null
           user_type: Database["public"]["Enums"]["user_type"]
+          username?: string | null
         }
         Update: {
           created_at?: string | null
@@ -611,8 +632,35 @@ export type Database = {
           id?: string
           phone?: string | null
           phone_verified?: boolean | null
+          referral_code?: string | null
+          referred_by?: string | null
           updated_at?: string | null
           user_type?: Database["public"]["Enums"]["user_type"]
+          username?: string | null
+        }
+        Relationships: []
+      }
+      referral_rewards: {
+        Row: {
+          created_at: string | null
+          id: string
+          points_awarded: number
+          referred_user_id: string
+          referrer_user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          points_awarded?: number
+          referred_user_id: string
+          referrer_user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          points_awarded?: number
+          referred_user_id?: string
+          referrer_user_id?: string
         }
         Relationships: []
       }
