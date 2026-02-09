@@ -51,7 +51,7 @@ interface AuthContextType {
   wallet: WalletInfo | null;
   rewards: RewardInfo | null;
   loading: boolean;
-  signUp: (email: string, password: string, userType: "employee" | "employer") => Promise<{ error: Error | null }>;
+  signUp: (email: string, password: string, userType: "employee" | "employer") => Promise<{ error: Error | null; user: any }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -212,34 +212,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (error) throw error;
 
+      // Profile, wallet, rewards, and user_roles are now created automatically 
+      // via the database trigger 'on_auth_user_created' which calls handle_new_user_signup()
+      // This avoids RLS issues during signup
+
       if (data.user) {
-        // Create profile
-        const { error: profileError } = await supabase
-          .from("profiles")
-          .insert({
-            id: data.user.id,
-            user_type: userType,
-            email: email,
-          });
-
-        if (profileError) throw profileError;
-
-        // Create user role
-        await supabase.from("user_roles").insert({
-          user_id: data.user.id,
-          role: userType,
-        });
-
         toast({
           title: "Account created!",
           description: "Please check your email to verify your account.",
         });
       }
 
-      return { error: null };
+      return { error: null, user: data.user };
     } catch (error) {
       console.error("Signup error:", error);
-      return { error: error as Error };
+      return { error: error as Error, user: null };
     }
   };
 

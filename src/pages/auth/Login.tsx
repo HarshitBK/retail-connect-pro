@@ -9,10 +9,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Users, Building2, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 const Login = () => {
   const navigate = useNavigate();
-  const { signIn, profile } = useAuth();
+  const { signIn } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<"employee" | "employer">("employee");
   const [showPassword, setShowPassword] = useState(false);
@@ -45,45 +46,69 @@ const Login = () => {
 
     setLoading(true);
 
-    // Determine if input is email or username
-    const isEmail = formData.identifier.includes("@");
-    let email = formData.identifier;
+    try {
+      // Determine if input is email or username
+      const isEmail = formData.identifier.includes("@");
+      let email = formData.identifier;
 
-    // If it's a username, we need to look up the email
-    // For now, we'll assume email login (username lookup would need backend)
-    if (!isEmail) {
-      // For username login, append @retailhire.local as a workaround
-      // In production, this would query the profiles table first
+      // If it's a username, look up the email from profiles table
+      if (!isEmail) {
+        const { data: profileData, error: lookupError } = await supabase
+          .from("profiles")
+          .select("email")
+          .eq("username", formData.identifier)
+          .maybeSingle();
+
+        if (lookupError || !profileData) {
+          toast({
+            title: "Login Failed",
+            description: "Username not found. Please check and try again.",
+            variant: "destructive",
+          });
+          setLoading(false);
+          return;
+        }
+
+        email = profileData.email;
+      }
+
+      const { error } = await signIn(email, formData.password);
+
+      if (error) {
+        toast({
+          title: "Login Failed",
+          description: error.message,
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
+
       toast({
-        title: "Login with Email",
-        description: "Please use your email address to login. Username login coming soon!",
-        variant: "default",
+        title: "Welcome back!",
+        description: "You have successfully logged in.",
       });
-      setLoading(false);
-      return;
-    }
 
-    const { error } = await signIn(email, formData.password);
+      // Redirect based on user type from profile
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("user_type")
+        .eq("email", email)
+        .maybeSingle();
 
-    if (error) {
+      const redirectPath = profile?.user_type === "employer" 
+        ? "/employer/dashboard" 
+        : "/employee/dashboard";
+      navigate(redirectPath);
+    } catch (err: any) {
       toast({
         title: "Login Failed",
-        description: error.message,
+        description: err.message || "An error occurred",
         variant: "destructive",
       });
+    } finally {
       setLoading(false);
-      return;
     }
-
-    toast({
-      title: "Welcome back!",
-      description: "You have successfully logged in.",
-    });
-
-    // Redirect based on user type
-    const redirectPath = activeTab === "employee" ? "/employee/dashboard" : "/employer/dashboard";
-    navigate(redirectPath);
-    setLoading(false);
   };
 
   return (

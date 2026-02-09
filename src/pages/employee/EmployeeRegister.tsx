@@ -257,8 +257,8 @@ const EmployeeRegister = () => {
     setLoading(true);
 
     try {
-      // 1. Create auth user
-      const { error: signUpError } = await signUp(formData.email, formData.password, "employee");
+      // 1. Create auth user - profile is auto-created via trigger
+      const { error: signUpError, user } = await signUp(formData.email, formData.password, "employee");
 
       if (signUpError) {
         toast({
@@ -270,15 +270,62 @@ const EmployeeRegister = () => {
         return;
       }
 
-      // Note: Profile creation is handled in the signUp function
-      // Employee profile and other data will be created after email verification
+      if (user) {
+        // Update profile with username and phone
+        await supabase
+          .from("profiles")
+          .update({
+            username: formData.username,
+            phone: formData.phone,
+            referred_by: formData.referralCode || null,
+          })
+          .eq("id", user.id);
+
+        // Create employee profile immediately (auto-confirm is enabled)
+        const { error: empError } = await supabase
+          .from("employee_profiles")
+          .insert([{
+            user_id: user.id,
+            full_name: formData.fullName,
+            gender: formData.gender,
+            date_of_birth: formData.dateOfBirth || null,
+            address_line1: formData.addressLine1,
+            address_line2: formData.addressLine2,
+            state: formData.stateName,
+            city: formData.cityName,
+            pincode: formData.pincode,
+            education_level: formData.educationLevel,
+            education_details: formData.educationDetails,
+            years_of_experience: parseInt(formData.yearsOfExperience) || 0,
+            current_organization: formData.currentOrganization,
+            skills: formData.skills,
+            retail_categories: formData.retailCategories,
+            preferred_work_cities: JSON.parse(JSON.stringify(formData.preferredWorkCities)),
+            aadhar_number: formData.aadharNumber || null,
+            pan_number: formData.panNumber || null,
+            bank_name: formData.bankName,
+            bank_account_number: formData.bankAccountNumber,
+            bank_ifsc: formData.bankIfsc,
+            employment_status: "available",
+            profile_completion_percent: calculateProfileCompletion(),
+          }]);
+
+        if (empError) {
+          console.error("Employee profile error:", empError);
+        }
+
+        // Handle referral reward
+        if (formData.referralCode) {
+          await handleReferralReward(user.id, formData.referralCode);
+        }
+      }
 
       toast({
         title: "Registration Successful! 🎉",
-        description: "Please check your email to verify your account. You earned 10 bonus points!",
+        description: "Your account has been created. You earned 10 bonus points!",
       });
 
-      navigate("/login");
+      navigate("/employee/dashboard");
     } catch (error: any) {
       toast({
         title: "Registration Failed",
@@ -287,6 +334,58 @@ const EmployeeRegister = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const calculateProfileCompletion = (): number => {
+    let score = 0;
+    const fields = [
+      formData.fullName,
+      formData.phone,
+      formData.dateOfBirth,
+      formData.gender,
+      formData.addressLine1,
+      formData.stateName,
+      formData.cityName,
+      formData.educationLevel,
+      formData.skills.length > 0,
+      formData.retailCategories.length > 0,
+      formData.preferredWorkCities.length > 0,
+    ];
+    fields.forEach(f => { if (f) score += 9; });
+    return Math.min(score, 100);
+  };
+
+  const handleReferralReward = async (newUserId: string, referralCode: string) => {
+    try {
+      const { data: referrer } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("referral_code", referralCode)
+        .maybeSingle();
+
+      if (referrer) {
+        await supabase.from("referral_rewards").insert({
+          referrer_user_id: referrer.id,
+          referred_user_id: newUserId,
+          points_awarded: 15,
+        });
+
+        const { data: rewards } = await supabase
+          .from("reward_points")
+          .select("id, points")
+          .eq("user_id", referrer.id)
+          .maybeSingle();
+
+        if (rewards) {
+          await supabase
+            .from("reward_points")
+            .update({ points: (rewards.points || 0) + 15 })
+            .eq("id", rewards.id);
+        }
+      }
+    } catch (err) {
+      console.error("Referral error:", err);
     }
   };
 

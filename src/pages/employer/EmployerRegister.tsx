@@ -46,6 +46,7 @@ import {
   usernameSchema,
 } from "@/lib/validations";
 import { COMPANY_TYPES, COMPANY_SIZES, INDUSTRY_TYPES } from "@/lib/constants";
+import { supabase } from "@/integrations/supabase/client";
 
 type Step = "company" | "contact" | "documents" | "payment";
 
@@ -228,7 +229,7 @@ const EmployerRegister = () => {
     setLoading(true);
 
     try {
-      const { error: signUpError } = await signUp(formData.contactPersonEmail, formData.password, "employer");
+      const { error: signUpError, user } = await signUp(formData.contactPersonEmail, formData.password, "employer");
 
       if (signUpError) {
         toast({
@@ -240,12 +241,58 @@ const EmployerRegister = () => {
         return;
       }
 
+      if (user) {
+        // Update profile with username and phone
+        await supabase
+          .from("profiles")
+          .update({
+            username: formData.username,
+            phone: formData.contactPersonPhone,
+            referred_by: formData.referralCode || null,
+          })
+          .eq("id", user.id);
+
+        // Create employer profile immediately (auto-confirm is enabled)
+        const { error: emplrError } = await supabase
+          .from("employer_profiles")
+          .insert([{
+            user_id: user.id,
+            organization_name: formData.organizationName,
+            organization_type: formData.organizationType,
+            gst_number: formData.gstNumber || null,
+            pan_number: formData.panNumber || null,
+            cin_number: formData.cinNumber || null,
+            number_of_stores: parseInt(formData.numberOfStores) || 1,
+            website: formData.website || null,
+            address_line1: formData.addressLine1,
+            address_line2: formData.addressLine2,
+            state: formData.stateName,
+            city: formData.cityName,
+            pincode: formData.pincode,
+            retail_categories: formData.retailCategories,
+            contact_person_name: formData.contactPersonName,
+            contact_person_designation: formData.contactPersonDesignation,
+            contact_person_email: formData.contactPersonEmail,
+            contact_person_phone: formData.contactPersonPhone,
+            subscription_status: "pending",
+          }]);
+
+        if (emplrError) {
+          console.error("Employer profile error:", emplrError);
+        }
+
+        // Handle referral reward
+        if (formData.referralCode) {
+          await handleReferralReward(user.id, formData.referralCode);
+        }
+      }
+
       toast({
         title: "Registration Successful! 🎉",
-        description: "Please check your email to verify your account.",
+        description: "Your company account has been created.",
       });
 
-      navigate("/login");
+      navigate("/employer/dashboard");
     } catch (error: any) {
       toast({
         title: "Registration Failed",
@@ -254,6 +301,39 @@ const EmployerRegister = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleReferralReward = async (newUserId: string, referralCode: string) => {
+    try {
+      const { data: referrer } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("referral_code", referralCode)
+        .maybeSingle();
+
+      if (referrer) {
+        await supabase.from("referral_rewards").insert([{
+          referrer_user_id: referrer.id,
+          referred_user_id: newUserId,
+          points_awarded: 15,
+        }]);
+
+        const { data: rewards } = await supabase
+          .from("reward_points")
+          .select("id, points")
+          .eq("user_id", referrer.id)
+          .maybeSingle();
+
+        if (rewards) {
+          await supabase
+            .from("reward_points")
+            .update({ points: (rewards.points || 0) + 15 })
+            .eq("id", rewards.id);
+        }
+      }
+    } catch (err) {
+      console.error("Referral error:", err);
     }
   };
 
