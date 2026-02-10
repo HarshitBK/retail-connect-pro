@@ -26,6 +26,7 @@ import AuthCallback from "./pages/auth/AuthCallback";
 // Employee Pages
 import EmployeeRegister from "./pages/employee/EmployeeRegister";
 import EmployeeDashboard from "./pages/employee/EmployeeDashboard";
+import TakeTest from "./pages/employee/TakeTest";
 import EmployeeProfileEdit from "./pages/employee/EmployeeProfileEdit";
 
 // Employer Pages
@@ -80,6 +81,14 @@ const App = () => (
               element={
                 <ProtectedRoute userType="employee">
                   <EmployeeProfileEdit />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/tests/:testId/take" 
+              element={
+                <ProtectedRoute userType="employee">
+                  <TakeTest />
                 </ProtectedRoute>
               } 
             />

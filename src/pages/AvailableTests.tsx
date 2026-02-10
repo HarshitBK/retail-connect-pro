@@ -192,8 +192,8 @@ const AvailableTests = () => {
                         Already Attempted
                       </Button>
                     ) : (
-                      <Button className="w-full">
-                        Take Test (₹{test.fee})
+                      <Button className="w-full" asChild>
+                        <Link to={`/tests/${test.id}/take`}>Take Test (₹{test.fee})</Link>
                       </Button>
                     )}
                   </CardContent>
