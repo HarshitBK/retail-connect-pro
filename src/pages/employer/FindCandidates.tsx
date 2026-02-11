@@ -2,15 +2,14 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import Header from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  Search, Filter, MapPin, Briefcase, GraduationCap, Clock,
+  Search, Filter, MapPin, Briefcase, GraduationCap,
   CheckCircle2, AlertCircle, Users, IndianRupee, Loader2,
   ArrowLeft, RefreshCw
 } from "lucide-react";
@@ -47,7 +46,7 @@ const FindCandidates = () => {
 
   const [filters, setFilters] = useState({
     state: "", city: "", experience: "", education: "",
-    gender: "", retailCategory: "", skills: [] as string[], status: "available",
+    gender: "", retailCategory: "", skills: [] as string[],
   });
 
   const [availableCities, setAvailableCities] = useState<{ id: string; name: string }[]>([]);
@@ -63,7 +62,6 @@ const FindCandidates = () => {
 
   const loadCities = async (stateName: string) => {
     setLoadingCities(true);
-    // Find state ID by name
     const state = states.find(s => s.name === stateName);
     if (state) {
       const cities = await fetchCitiesByState(state.id);
@@ -75,7 +73,7 @@ const FindCandidates = () => {
   const fetchCandidates = async () => {
     setLoading(true);
     try {
-      // Only show available candidates (not reserved, not employed)
+      // Only show available candidates (not reserved, not employed, not blacklisted)
       const { data, error } = await supabase
         .from("employee_profiles")
         .select("id, skills, retail_categories, years_of_experience, education_level, city, state, employment_status, gender, profile_completion_percent")
@@ -129,9 +127,7 @@ const FindCandidates = () => {
   });
 
   const toggleCandidate = (id: string) => {
-    setSelectedCandidates(prev =>
-      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
-    );
+    setSelectedCandidates(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
   };
 
   const totalCost = selectedCandidates.length * 500;
@@ -149,23 +145,16 @@ const FindCandidates = () => {
       toast({ title: "Error", description: "Employer profile not found", variant: "destructive" });
       return;
     }
-
     if ((wallet?.balance || 0) < totalCost) {
-      toast({
-        title: "Insufficient Balance",
-        description: `You need ₹${totalCost}. Your balance: ₹${wallet?.balance || 0}. Please add money to your wallet.`,
-        variant: "destructive",
-      });
+      toast({ title: "Insufficient Balance", description: `You need ₹${totalCost}. Your balance: ₹${wallet?.balance || 0}.`, variant: "destructive" });
       setShowConfirmDialog(false);
       return;
     }
 
     setReserving(true);
-
     try {
       const expiresAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
 
-      // 1. Create reservations
       const reservations = selectedCandidates.map(empId => ({
         employer_id: employerProfile.id,
         employee_id: empId,
@@ -174,61 +163,53 @@ const FindCandidates = () => {
         expires_at: expiresAt,
       }));
 
-      const { error: resError } = await supabase
-        .from("candidate_reservations")
-        .insert(reservations);
+      const { error: resError } = await supabase.from("candidate_reservations").insert(reservations);
       if (resError) throw resError;
 
-      // 2. Update employee status to reserved
+      // Update each employee status to reserved
       for (const empId of selectedCandidates) {
-        await supabase
-          .from("employee_profiles")
-          .update({
-            employment_status: "reserved",
-            reserved_by: employerProfile.id,
-            reservation_expires_at: expiresAt,
-          })
-          .eq("id", empId);
+        await supabase.from("employee_profiles").update({
+          employment_status: "reserved",
+          reserved_by: employerProfile.id,
+          reservation_expires_at: expiresAt,
+        }).eq("id", empId);
+
+        // Notify employee about reservation
+        const { data: empData } = await supabase.from("employee_profiles").select("user_id").eq("id", empId).single();
+        if (empData?.user_id) {
+          await supabase.from("notifications").insert({
+            user_id: empData.user_id,
+            title: "🔔 You've been reserved!",
+            message: `${employerProfile.organizationName} has reserved your profile. They'll review your details and make a hiring decision within 5 days.`,
+            type: "reserved",
+            reference_type: "reservation",
+          });
+        }
       }
 
-      // 3. Deduct wallet balance
+      // Deduct wallet balance
       const newBalance = (wallet?.balance || 0) - totalCost;
-      await supabase
-        .from("wallets")
-        .update({ balance: newBalance })
-        .eq("user_id", user.id);
+      await supabase.from("wallets").update({ balance: newBalance }).eq("user_id", user.id);
 
-      // 4. Create wallet transaction record
-      const { data: walletData } = await supabase
-        .from("wallets")
-        .select("id")
-        .eq("user_id", user.id)
-        .single();
-
+      const { data: walletData } = await supabase.from("wallets").select("id").eq("user_id", user.id).single();
       if (walletData) {
         await supabase.from("wallet_transactions").insert(
           selectedCandidates.map(empId => ({
             wallet_id: walletData.id,
             amount: 500,
             transaction_type: "debit" as const,
-            description: `Reservation fee for candidate`,
+            description: "Reservation fee for candidate",
             reference_id: empId,
             reference_type: "reservation",
           }))
         );
       }
 
-      // 5. Refresh auth context to get updated wallet
       await refreshProfile();
-
-      toast({
-        title: "Candidates Reserved! 🎉",
-        description: `₹${totalCost} deducted. ${selectedCandidates.length} candidate(s) reserved for 5 days. Check your dashboard for full details.`,
-      });
-
+      toast({ title: "Candidates Reserved! 🎉", description: `₹${totalCost} deducted. ${selectedCandidates.length} candidate(s) reserved for 5 days.` });
       setSelectedCandidates([]);
       setShowConfirmDialog(false);
-      fetchCandidates();
+      fetchCandidates(); // Refresh - reserved candidates will no longer show
     } catch (error: any) {
       console.error("Reservation error:", error);
       toast({ title: "Reservation Failed", description: error.message, variant: "destructive" });
@@ -245,12 +226,10 @@ const FindCandidates = () => {
     return "5+ years";
   };
 
-  const getCategoryLabel = (val: string) => {
-    return RETAIL_CATEGORIES.find(c => c.value === val)?.label || val;
-  };
+  const getCategoryLabel = (val: string) => RETAIL_CATEGORIES.find(c => c.value === val)?.label || val;
 
   const clearFilters = () => {
-    setFilters({ state: "", city: "", experience: "", education: "", gender: "", retailCategory: "", skills: [], status: "available" });
+    setFilters({ state: "", city: "", experience: "", education: "", gender: "", retailCategory: "", skills: [] });
   };
 
   return (
@@ -263,17 +242,15 @@ const FindCandidates = () => {
               <Link to="/employer/dashboard"><ArrowLeft className="w-4 h-4 mr-2" />Back to Dashboard</Link>
             </Button>
             <h1 className="font-display text-2xl md:text-3xl font-bold text-foreground mb-2">Find Candidates</h1>
-            <p className="text-muted-foreground">Search verified retail professionals. Personal details hidden until reservation.</p>
+            <p className="text-muted-foreground">Search verified retail professionals. Only available candidates shown.</p>
           </div>
 
           <div className="grid lg:grid-cols-4 gap-6">
-            {/* Filters */}
             <div className="lg:col-span-1">
               <Card className="sticky top-24">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2"><Filter className="w-5 h-5" />Filters</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="pt-6 space-y-4">
+                  <h3 className="text-lg font-semibold flex items-center gap-2"><Filter className="w-5 h-5" />Filters</h3>
+
                   <div className="space-y-2">
                     <Label>State</Label>
                     <Select value={filters.state} onValueChange={v => setFilters(prev => ({ ...prev, state: v, city: "" }))}>
@@ -350,12 +327,10 @@ const FindCandidates = () => {
                           key={skill}
                           variant={filters.skills.includes(skill) ? "default" : "outline"}
                           className="cursor-pointer text-xs"
-                          onClick={() => {
-                            setFilters(prev => ({
-                              ...prev,
-                              skills: prev.skills.includes(skill) ? prev.skills.filter(s => s !== skill) : [...prev.skills, skill]
-                            }));
-                          }}
+                          onClick={() => setFilters(prev => ({
+                            ...prev,
+                            skills: prev.skills.includes(skill) ? prev.skills.filter(s => s !== skill) : [...prev.skills, skill]
+                          }))}
                         >
                           {skill}
                         </Badge>
@@ -371,12 +346,9 @@ const FindCandidates = () => {
               </Card>
             </div>
 
-            {/* Candidate List - NO personal details shown */}
             <div className="lg:col-span-3 space-y-4">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-card p-4 rounded-lg border border-border">
-                <p className="text-sm text-muted-foreground">
-                  Showing <strong>{filteredCandidates.length}</strong> available candidates
-                </p>
+                <p className="text-sm text-muted-foreground">Showing <strong>{filteredCandidates.length}</strong> available candidates</p>
                 {selectedCandidates.length > 0 && (
                   <div className="flex items-center gap-4">
                     <p className="text-sm"><strong>{selectedCandidates.length}</strong> selected (₹{totalCost})</p>
@@ -398,57 +370,38 @@ const FindCandidates = () => {
                 </Card>
               ) : (
                 <div className="grid gap-4">
-                  {filteredCandidates.map((candidate) => (
+                  {filteredCandidates.map(candidate => (
                     <Card
                       key={candidate.id}
-                      className={`transition-all cursor-pointer ${
-                        selectedCandidates.includes(candidate.id) ? "border-primary shadow-md" : "hover:border-primary/50"
-                      }`}
+                      className={`transition-all cursor-pointer ${selectedCandidates.includes(candidate.id) ? "border-primary shadow-md" : "hover:border-primary/50"}`}
                       onClick={() => toggleCandidate(candidate.id)}
                     >
                       <CardContent className="pt-6">
                         <div className="flex items-start gap-4">
-                          <Checkbox
-                            checked={selectedCandidates.includes(candidate.id)}
-                            onCheckedChange={() => toggleCandidate(candidate.id)}
-                            className="mt-1"
-                          />
+                          <Checkbox checked={selectedCandidates.includes(candidate.id)} onCheckedChange={() => toggleCandidate(candidate.id)} className="mt-1" />
                           <div className="flex-1 min-w-0">
                             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                               <div className="space-y-3">
-                                {/* Anonymous identifier - NO name shown */}
                                 <div className="flex items-center gap-2">
-                                  <span className="font-semibold text-foreground">
-                                    Candidate #{String(candidate.index).padStart(4, "0")}
-                                  </span>
-                                  <Badge variant="outline" className="text-success border-success">
-                                    <CheckCircle2 className="w-3 h-3 mr-1" />Available
-                                  </Badge>
-                                  {candidate.profileCompletion >= 80 && (
-                                    <Badge variant="secondary">Verified Profile</Badge>
-                                  )}
+                                  <span className="font-semibold text-foreground">Candidate #{String(candidate.index).padStart(4, "0")}</span>
+                                  <Badge variant="outline" className="text-success border-success"><CheckCircle2 className="w-3 h-3 mr-1" />Available</Badge>
+                                  {candidate.profileCompletion >= 80 && <Badge variant="secondary">Verified Profile</Badge>}
                                 </div>
 
-                                {/* Retail Categories */}
                                 {candidate.retailCategories.length > 0 && (
                                   <div className="flex flex-wrap gap-1">
                                     {candidate.retailCategories.slice(0, 3).map((cat, i) => (
                                       <Badge key={i} variant="default" className="text-xs">{getCategoryLabel(cat)}</Badge>
                                     ))}
-                                    {candidate.retailCategories.length > 3 && (
-                                      <Badge variant="outline" className="text-xs">+{candidate.retailCategories.length - 3} more</Badge>
-                                    )}
+                                    {candidate.retailCategories.length > 3 && <Badge variant="outline" className="text-xs">+{candidate.retailCategories.length - 3} more</Badge>}
                                   </div>
                                 )}
 
-                                {/* Skills */}
                                 <div className="flex flex-wrap gap-1">
                                   {candidate.skills.slice(0, 4).map((skill, i) => (
                                     <Badge key={i} variant="secondary" className="text-xs">{skill}</Badge>
                                   ))}
-                                  {candidate.skills.length > 4 && (
-                                    <Badge variant="outline" className="text-xs">+{candidate.skills.length - 4}</Badge>
-                                  )}
+                                  {candidate.skills.length > 4 && <Badge variant="outline" className="text-xs">+{candidate.skills.length - 4}</Badge>}
                                 </div>
 
                                 <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
@@ -476,7 +429,6 @@ const FindCandidates = () => {
         </div>
       </main>
 
-      {/* Confirm Dialog */}
       <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
         <DialogContent>
           <DialogHeader>

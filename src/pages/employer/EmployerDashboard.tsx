@@ -13,7 +13,7 @@ import {
   Building2, Users, Search, FileText, Wallet, Edit, Plus,
   UserCheck, UserX, Clock, Star, MapPin, Phone, Mail,
   Calendar, ArrowRight, Eye, Loader2, Share2, Briefcase,
-  GraduationCap, Shield, AlertTriangle,
+  GraduationCap, Shield, AlertTriangle, LogOut,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -30,13 +30,11 @@ const EmployerDashboard = () => {
   const [tests, setTests] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
-  // Rating dialog
   const [showRateDialog, setShowRateDialog] = useState(false);
   const [ratingTarget, setRatingTarget] = useState<any>(null);
   const [ratingValue, setRatingValue] = useState("3");
   const [ratingComment, setRatingComment] = useState("");
 
-  // Blacklist dialog
   const [showBlacklistDialog, setShowBlacklistDialog] = useState(false);
   const [blacklistTarget, setBlacklistTarget] = useState<any>(null);
   const [blacklistReason, setBlacklistReason] = useState("");
@@ -50,14 +48,34 @@ const EmployerDashboard = () => {
   const fetchDashboardData = async () => {
     if (!employerProfile) return;
     try {
+      // First check and expire old reservations
+      await checkExpiredReservations();
+
       const [resRes, hiredRes, testsRes] = await Promise.all([
-        supabase.from("candidate_reservations").select("*, employee_profiles(*)").eq("employer_id", employerProfile.id).eq("status", "pending").order("created_at", { ascending: false }),
-        supabase.from("hired_candidates").select("*, employee_profiles(*)").eq("employer_id", employerProfile.id).order("hired_date", { ascending: false }),
-        supabase.from("skill_tests").select("*").eq("employer_id", employerProfile.id).order("created_at", { ascending: false }),
+        supabase.from("candidate_reservations")
+          .select("*, employee_profiles(*)")
+          .eq("employer_id", employerProfile.id)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false }),
+        supabase.from("hired_candidates")
+          .select("*, employee_profiles(*)")
+          .eq("employer_id", employerProfile.id)
+          .order("hired_date", { ascending: false }),
+        supabase.from("skill_tests")
+          .select("*")
+          .eq("employer_id", employerProfile.id)
+          .order("created_at", { ascending: false }),
       ]);
 
-      setReservedCandidates(resRes.data || []);
-      setHiredCandidates(hiredRes.data || []);
+      // For reserved candidates, fetch their profile contact info
+      const reserved = resRes.data || [];
+      const enrichedReserved = await enrichWithContactInfo(reserved);
+      
+      const hired = hiredRes.data || [];
+      const enrichedHired = await enrichWithContactInfo(hired);
+
+      setReservedCandidates(enrichedReserved);
+      setHiredCandidates(enrichedHired);
       setTests(testsRes.data || []);
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
@@ -66,13 +84,54 @@ const EmployerDashboard = () => {
     }
   };
 
+  const checkExpiredReservations = async () => {
+    if (!employerProfile) return;
+    // Check for expired reservations and update them
+    const { data: expired } = await supabase
+      .from("candidate_reservations")
+      .select("id, employee_id")
+      .eq("employer_id", employerProfile.id)
+      .eq("status", "pending")
+      .lt("expires_at", new Date().toISOString());
+
+    if (expired && expired.length > 0) {
+      for (const res of expired) {
+        await supabase.from("candidate_reservations")
+          .update({ status: "expired" })
+          .eq("id", res.id);
+        await supabase.from("employee_profiles")
+          .update({ employment_status: "available", reserved_by: null, reservation_expires_at: null })
+          .eq("id", res.employee_id);
+      }
+    }
+  };
+
+  const enrichWithContactInfo = async (items: any[]) => {
+    if (items.length === 0) return items;
+    const userIds = items
+      .map(i => i.employee_profiles?.user_id)
+      .filter(Boolean);
+    
+    if (userIds.length === 0) return items;
+
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, email, phone")
+      .in("id", userIds);
+
+    const profileMap = new Map((profiles || []).map(p => [p.id, p]));
+
+    return items.map(item => ({
+      ...item,
+      _contactInfo: profileMap.get(item.employee_profiles?.user_id) || null,
+    }));
+  };
+
   const handleHireDecision = async (reservation: any, hired: boolean) => {
     if (!user || !employerProfile) return;
-
     try {
       const empProfile = reservation.employee_profiles;
 
-      // 1. Update reservation status
       await supabase.from("candidate_reservations").update({
         status: hired ? "hired" : "not_hired",
         hired_at: hired ? new Date().toISOString() : null,
@@ -81,54 +140,104 @@ const EmployerDashboard = () => {
       }).eq("id", reservation.id);
 
       if (hired) {
-        // 2a. Create hired_candidates record
         await supabase.from("hired_candidates").insert({
           employer_id: employerProfile.id,
           employee_id: reservation.employee_id,
           reservation_id: reservation.id,
           hired_date: new Date().toISOString().split("T")[0],
+          status: "active",
         });
 
-        // 2b. Update employee status to employed
         await supabase.from("employee_profiles").update({
           employment_status: "employed",
           reserved_by: null,
           reservation_expires_at: null,
         }).eq("id", reservation.employee_id);
 
+        // Notify employee
+        if (empProfile?.user_id) {
+          await supabase.from("notifications").insert({
+            user_id: empProfile.user_id,
+            title: "🎉 You've been hired!",
+            message: `${employerProfile.organizationName} has hired you. Congratulations!`,
+            type: "hired",
+            reference_id: reservation.id,
+            reference_type: "reservation",
+          });
+        }
+
         toast({ title: "Candidate Hired! 🎉", description: `${empProfile?.full_name} has been marked as hired.` });
       } else {
-        // 3a. Refund ₹200 to employer wallet
         const newBalance = (wallet?.balance || 0) + 200;
         await supabase.from("wallets").update({ balance: newBalance }).eq("user_id", user.id);
 
-        // 3b. Create refund transaction
         const { data: walletData } = await supabase.from("wallets").select("id").eq("user_id", user.id).single();
         if (walletData) {
           await supabase.from("wallet_transactions").insert({
             wallet_id: walletData.id,
             amount: 200,
             transaction_type: "refund" as const,
-            description: `Refund for not hiring candidate`,
+            description: "Refund for not hiring candidate",
             reference_id: reservation.id,
             reference_type: "reservation_refund",
           });
         }
 
-        // 3c. Make candidate available again
         await supabase.from("employee_profiles").update({
           employment_status: "available",
           reserved_by: null,
           reservation_expires_at: null,
         }).eq("id", reservation.employee_id);
 
-        toast({ title: "Candidate Released", description: `₹200 refund added to your wallet. Candidate is now available again.` });
+        // Notify employee
+        if (empProfile?.user_id) {
+          await supabase.from("notifications").insert({
+            user_id: empProfile.user_id,
+            title: "Reservation Update",
+            message: `${employerProfile.organizationName} has decided not to proceed. You are now available for other opportunities.`,
+            type: "not_hired",
+            reference_id: reservation.id,
+            reference_type: "reservation",
+          });
+        }
+
+        toast({ title: "Candidate Released", description: "₹200 refund added to your wallet. Candidate is now available again." });
       }
 
       await refreshProfile();
       fetchDashboardData();
     } catch (error: any) {
       console.error("Error:", error);
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleRelease = async (hired: any) => {
+    try {
+      // Update hired record
+      await supabase.from("hired_candidates")
+        .update({ status: "released", released_at: new Date().toISOString() })
+        .eq("id", hired.id);
+
+      // Make employee available again
+      await supabase.from("employee_profiles")
+        .update({ employment_status: "available", reserved_by: null })
+        .eq("id", hired.employee_id);
+
+      // Notify employee
+      if (hired.employee_profiles?.user_id) {
+        await supabase.from("notifications").insert({
+          user_id: hired.employee_profiles.user_id,
+          title: "You've been released",
+          message: `${employerProfile?.organizationName} has released you. You are now available for new opportunities.`,
+          type: "released",
+          reference_type: "hired",
+        });
+      }
+
+      toast({ title: "Employee Released", description: "The employee is now available for other opportunities." });
+      fetchDashboardData();
+    } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     }
   };
@@ -140,6 +249,16 @@ const EmployerDashboard = () => {
         rating: parseInt(ratingValue),
         rating_comment: ratingComment,
       }).eq("id", ratingTarget.id);
+
+      if (ratingTarget.employee_profiles?.user_id) {
+        await supabase.from("notifications").insert({
+          user_id: ratingTarget.employee_profiles.user_id,
+          title: `⭐ You received a ${ratingValue}-star rating!`,
+          message: `${employerProfile?.organizationName} rated you ${ratingValue}/5.${ratingComment ? ` Comment: "${ratingComment}"` : ""}`,
+          type: "rating",
+          reference_type: "hired",
+        });
+      }
 
       toast({ title: "Rating Saved!", description: "Thank you for your feedback." });
       setShowRateDialog(false);
@@ -161,6 +280,16 @@ const EmployerDashboard = () => {
       await supabase.from("employee_profiles").update({
         is_blacklisted: true,
       }).eq("id", blacklistTarget.employee_id);
+
+      if (blacklistTarget.employee_profiles?.user_id) {
+        await supabase.from("notifications").insert({
+          user_id: blacklistTarget.employee_profiles.user_id,
+          title: "⚠️ Account Flagged",
+          message: "Your account has been flagged by an employer. Please contact support for details.",
+          type: "blacklist",
+          reference_type: "hired",
+        });
+      }
 
       toast({ title: "Candidate Blacklisted", description: "This candidate will no longer appear in searches." });
       setShowBlacklistDialog(false);
@@ -184,7 +313,8 @@ const EmployerDashboard = () => {
 
   const stats = {
     reserved: reservedCandidates.length,
-    hired: hiredCandidates.length,
+    hired: hiredCandidates.filter(h => h.status === "active").length,
+    released: hiredCandidates.filter(h => h.status === "released").length,
     testsCreated: tests.length,
     activeTests: tests.filter(t => t.status === "published").length,
   };
@@ -260,7 +390,6 @@ const EmployerDashboard = () => {
 
             {/* Right Column */}
             <div className="lg:col-span-2 space-y-6">
-              {/* Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Card className="bg-warning/5 border-warning/20">
                   <CardContent className="pt-4 pb-4">
@@ -290,20 +419,19 @@ const EmployerDashboard = () => {
                   <CardContent className="pt-4 pb-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center"><Users className="w-5 h-5 text-accent" /></div>
-                      <div><div className="text-2xl font-bold">{stats.activeTests}</div><p className="text-xs text-muted-foreground">Active Tests</p></div>
+                      <div><div className="text-2xl font-bold">{stats.released}</div><p className="text-xs text-muted-foreground">Released</p></div>
                     </div>
                   </CardContent>
                 </Card>
               </div>
 
-              {/* Tabs */}
               <Tabs defaultValue="reserved" className="w-full">
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="reserved"><Clock className="w-4 h-4 mr-2" />Reserved ({stats.reserved})</TabsTrigger>
                   <TabsTrigger value="hired"><UserCheck className="w-4 h-4 mr-2" />Hired ({stats.hired})</TabsTrigger>
                 </TabsList>
 
-                {/* Reserved Tab - FULL details shown */}
+                {/* Reserved Tab */}
                 <TabsContent value="reserved" className="mt-4">
                   <Card>
                     <CardHeader>
@@ -315,6 +443,7 @@ const EmployerDashboard = () => {
                         <div className="space-y-6">
                           {reservedCandidates.map((reservation) => {
                             const emp = reservation.employee_profiles;
+                            const contact = reservation._contactInfo;
                             const daysLeft = reservation.expires_at
                               ? Math.max(0, Math.ceil((new Date(reservation.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
                               : 5;
@@ -328,41 +457,32 @@ const EmployerDashboard = () => {
                                       <Badge variant="outline" className="text-warning border-warning">
                                         <Clock className="w-3 h-3 mr-1" />{daysLeft} days left
                                       </Badge>
-                                      {emp?.aadhar_number && (
-                                        <Badge variant="secondary"><Shield className="w-3 h-3 mr-1" />Aadhar Verified</Badge>
-                                      )}
+                                      {emp?.aadhar_number && <Badge variant="secondary"><Shield className="w-3 h-3 mr-1" />Aadhar Verified</Badge>}
+                                      {emp?.pan_number && <Badge variant="secondary"><Shield className="w-3 h-3 mr-1" />PAN Verified</Badge>}
                                     </div>
 
-                                    {/* Contact details */}
                                     <div className="grid md:grid-cols-2 gap-2 text-sm">
                                       <div className="flex items-center gap-2 text-muted-foreground">
-                                        <Phone className="w-4 h-4" />
-                                        {/* We need to get phone from profiles table - for now show what we have */}
-                                        Contact available
+                                        <Phone className="w-4 h-4" />{contact?.phone || "N/A"}
                                       </div>
                                       <div className="flex items-center gap-2 text-muted-foreground">
-                                        <Mail className="w-4 h-4" />Email available
+                                        <Mail className="w-4 h-4" />{contact?.email || "N/A"}
                                       </div>
                                       <div className="flex items-center gap-2 text-muted-foreground">
-                                        <MapPin className="w-4 h-4" />{emp?.city}, {emp?.state} - {emp?.pincode}
+                                        <MapPin className="w-4 h-4" />
+                                        {emp?.address_line1 && `${emp.address_line1}, `}{emp?.city}, {emp?.state} {emp?.pincode ? `- ${emp.pincode}` : ""}
                                       </div>
                                       <div className="flex items-center gap-2 text-muted-foreground">
                                         <Briefcase className="w-4 h-4" />{emp?.years_of_experience || 0} years exp
                                       </div>
                                       <div className="flex items-center gap-2 text-muted-foreground">
-                                        <GraduationCap className="w-4 h-4" />{emp?.education_level || "N/A"} - {emp?.education_details || ""}
+                                        <GraduationCap className="w-4 h-4" />
+                                        {emp?.education_level || "N/A"}{emp?.education_grade ? ` (${emp.education_grade})` : ""} - {emp?.education_details || ""}
                                       </div>
                                       <div className="flex items-center gap-2 text-muted-foreground">
                                         <Building2 className="w-4 h-4" />{emp?.current_organization || "No current org"}
                                       </div>
                                     </div>
-
-                                    {/* Address */}
-                                    {emp?.address_line1 && (
-                                      <p className="text-sm text-muted-foreground">
-                                        📍 {emp.address_line1}{emp.address_line2 ? `, ${emp.address_line2}` : ""}, {emp.city}, {emp.state} - {emp.pincode}
-                                      </p>
-                                    )}
 
                                     {/* Skills */}
                                     {emp?.skills && (emp.skills as string[]).length > 0 && (
@@ -417,7 +537,7 @@ const EmployerDashboard = () => {
                   </Card>
                 </TabsContent>
 
-                {/* Hired Tab - Full details with rate/blacklist */}
+                {/* Hired Tab */}
                 <TabsContent value="hired" className="mt-4">
                   <Card>
                     <CardHeader>
@@ -429,13 +549,19 @@ const EmployerDashboard = () => {
                         <div className="space-y-6">
                           {hiredCandidates.map((hired) => {
                             const emp = hired.employee_profiles;
+                            const contact = hired._contactInfo;
+                            const isActive = hired.status === "active";
                             return (
                               <div key={hired.id} className="p-4 border border-border rounded-lg space-y-3">
                                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                                   <div className="space-y-2 flex-1">
                                     <div className="flex items-center gap-2 flex-wrap">
                                       <span className="font-semibold text-lg text-foreground">{emp?.full_name || "Employee"}</span>
-                                      <Badge className="bg-success text-success-foreground"><UserCheck className="w-3 h-3 mr-1" />Hired</Badge>
+                                      {isActive ? (
+                                        <Badge className="bg-success text-success-foreground"><UserCheck className="w-3 h-3 mr-1" />Active</Badge>
+                                      ) : (
+                                        <Badge variant="outline"><LogOut className="w-3 h-3 mr-1" />Released</Badge>
+                                      )}
                                       {hired.rating && (
                                         <div className="flex items-center gap-1">
                                           {[...Array(5)].map((_, i) => (
@@ -443,12 +569,16 @@ const EmployerDashboard = () => {
                                           ))}
                                         </div>
                                       )}
-                                      {hired.is_blacklisted && (
-                                        <Badge variant="destructive"><AlertTriangle className="w-3 h-3 mr-1" />Blacklisted</Badge>
-                                      )}
+                                      {hired.is_blacklisted && <Badge variant="destructive"><AlertTriangle className="w-3 h-3 mr-1" />Blacklisted</Badge>}
                                     </div>
 
                                     <div className="grid md:grid-cols-2 gap-2 text-sm">
+                                      <div className="flex items-center gap-2 text-muted-foreground">
+                                        <Phone className="w-4 h-4" />{contact?.phone || "N/A"}
+                                      </div>
+                                      <div className="flex items-center gap-2 text-muted-foreground">
+                                        <Mail className="w-4 h-4" />{contact?.email || "N/A"}
+                                      </div>
                                       <div className="flex items-center gap-2 text-muted-foreground">
                                         <MapPin className="w-4 h-4" />{emp?.city}, {emp?.state}
                                       </div>
@@ -459,7 +589,7 @@ const EmployerDashboard = () => {
                                         <Calendar className="w-4 h-4" />Hired on {new Date(hired.hired_date || hired.created_at).toLocaleDateString()}
                                       </div>
                                       <div className="flex items-center gap-2 text-muted-foreground">
-                                        <GraduationCap className="w-4 h-4" />{emp?.education_level || "N/A"}
+                                        <GraduationCap className="w-4 h-4" />{emp?.education_level || "N/A"}{emp?.education_grade ? ` (${emp.education_grade})` : ""}
                                       </div>
                                     </div>
 
@@ -471,6 +601,20 @@ const EmployerDashboard = () => {
                                       </div>
                                     )}
 
+                                    {emp?.retail_categories && (emp.retail_categories as string[]).length > 0 && (
+                                      <div className="flex flex-wrap gap-1">
+                                        {(emp.retail_categories as string[]).map((cat: string, i: number) => (
+                                          <Badge key={i} variant="default" className="text-xs">{getCategoryLabel(cat)}</Badge>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {emp?.resume_url && (
+                                      <a href={emp.resume_url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline flex items-center gap-1">
+                                        <FileText className="w-4 h-4" />View Resume/CV
+                                      </a>
+                                    )}
+
                                     {hired.rating_comment && (
                                       <p className="text-sm text-muted-foreground italic">"{hired.rating_comment}"</p>
                                     )}
@@ -480,6 +624,11 @@ const EmployerDashboard = () => {
                                     {!hired.rating && (
                                       <Button variant="outline" size="sm" onClick={() => { setRatingTarget(hired); setShowRateDialog(true); }}>
                                         <Star className="w-4 h-4 mr-1" />Rate
+                                      </Button>
+                                    )}
+                                    {isActive && (
+                                      <Button variant="outline" size="sm" onClick={() => handleRelease(hired)}>
+                                        <LogOut className="w-4 h-4 mr-1" />Release
                                       </Button>
                                     )}
                                     {!hired.is_blacklisted && (

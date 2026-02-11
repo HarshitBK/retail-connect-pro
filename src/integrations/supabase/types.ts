@@ -191,6 +191,7 @@ export type Database = {
           current_organization: string | null
           date_of_birth: string | null
           education_details: string | null
+          education_grade: string | null
           education_level: string | null
           employment_status:
             | Database["public"]["Enums"]["employment_status"]
@@ -231,6 +232,7 @@ export type Database = {
           current_organization?: string | null
           date_of_birth?: string | null
           education_details?: string | null
+          education_grade?: string | null
           education_level?: string | null
           employment_status?:
             | Database["public"]["Enums"]["employment_status"]
@@ -271,6 +273,7 @@ export type Database = {
           current_organization?: string | null
           date_of_birth?: string | null
           education_details?: string | null
+          education_grade?: string | null
           education_level?: string | null
           employment_status?:
             | Database["public"]["Enums"]["employment_status"]
@@ -461,7 +464,9 @@ export type Database = {
           position: string | null
           rating: number | null
           rating_comment: string | null
+          released_at: string | null
           reservation_id: string | null
+          status: string | null
           updated_at: string | null
         }
         Insert: {
@@ -476,7 +481,9 @@ export type Database = {
           position?: string | null
           rating?: number | null
           rating_comment?: string | null
+          released_at?: string | null
           reservation_id?: string | null
+          status?: string | null
           updated_at?: string | null
         }
         Update: {
@@ -491,7 +498,9 @@ export type Database = {
           position?: string | null
           rating?: number | null
           rating_comment?: string | null
+          released_at?: string | null
           reservation_id?: string | null
+          status?: string | null
           updated_at?: string | null
         }
         Relationships: [
@@ -559,6 +568,42 @@ export type Database = {
           code?: string
           id?: string
           name?: string
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          created_at: string
+          id: string
+          is_read: boolean
+          message: string
+          reference_id: string | null
+          reference_type: string | null
+          title: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_read?: boolean
+          message: string
+          reference_id?: string | null
+          reference_type?: string | null
+          title: string
+          type?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_read?: boolean
+          message?: string
+          reference_id?: string | null
+          reference_type?: string | null
+          title?: string
+          type?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -942,6 +987,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      check_expired_reservations: { Args: never; Returns: undefined }
       get_user_type: {
         Args: { user_uuid: string }
         Returns: Database["public"]["Enums"]["user_type"]
