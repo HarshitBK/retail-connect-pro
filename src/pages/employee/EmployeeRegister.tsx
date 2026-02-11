@@ -31,7 +31,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useIndianLocations } from "@/hooks/useIndianLocations";
-import WorkLocationSelector, { SelectedCity } from "@/components/shared/WorkLocationSelector";
+import CitySelector, { SelectedCityItem } from "@/components/shared/CitySelector";
 import RetailCategorySelector from "@/components/shared/RetailCategorySelector";
 import DocumentUpload from "@/components/shared/DocumentUpload";
 import {
@@ -85,12 +85,13 @@ const EmployeeRegister = () => {
     // Education
     educationLevel: "",
     educationDetails: "",
+    educationGrade: "",
     // Professional
     yearsOfExperience: "",
     currentOrganization: "",
     skills: [] as string[],
     retailCategories: [] as string[],
-    preferredWorkCities: [] as SelectedCity[],
+    preferredWorkCities: [] as SelectedCityItem[],
     resume: null as File | null,
     // Documents
     aadharNumber: "",
@@ -296,6 +297,7 @@ const EmployeeRegister = () => {
             pincode: formData.pincode,
             education_level: formData.educationLevel,
             education_details: formData.educationDetails,
+            education_grade: formData.educationGrade,
             years_of_experience: parseInt(formData.yearsOfExperience) || 0,
             current_organization: formData.currentOrganization,
             skills: formData.skills,
@@ -313,6 +315,22 @@ const EmployeeRegister = () => {
         if (empError) {
           console.error("Employee profile error:", empError);
         }
+
+        // Create welcome notifications
+        await supabase.from("notifications").insert([
+          {
+            user_id: user.id,
+            title: "🎉 Welcome to RetailHire!",
+            message: "Your account has been created successfully. Complete your profile to get discovered by top employers!",
+            type: "welcome",
+          },
+          {
+            user_id: user.id,
+            title: "🎁 Bonus Points Credited!",
+            message: "You've earned 10 bonus points for registering. Share your referral code to earn more!",
+            type: "points",
+          },
+        ]);
 
         // Handle referral reward
         if (formData.referralCode) {
@@ -618,7 +636,7 @@ const EmployeeRegister = () => {
                   {/* Education Section */}
                   <div className="border-t pt-6">
                     <h4 className="font-semibold text-foreground mb-4">Education Details</h4>
-                    <div className="grid md:grid-cols-2 gap-4">
+                    <div className="grid md:grid-cols-3 gap-4">
                       <div className="space-y-2">
                         <Label>Highest Education *</Label>
                         <Select
@@ -636,6 +654,15 @@ const EmployeeRegister = () => {
                             ))}
                           </SelectContent>
                         </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="educationGrade">Grade / Percentage</Label>
+                        <Input
+                          id="educationGrade"
+                          placeholder="e.g., 85% or 8.5 CGPA"
+                          value={formData.educationGrade}
+                          onChange={(e) => handleInputChange("educationGrade", e.target.value)}
+                        />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="educationDetails">Institution/Details</Label>
@@ -718,7 +745,7 @@ const EmployeeRegister = () => {
                   )}
 
                   {/* Preferred Work Locations */}
-                  <WorkLocationSelector
+                  <CitySelector
                     selectedCities={formData.preferredWorkCities}
                     onChange={(cities) => handleInputChange("preferredWorkCities", cities)}
                     maxCities={5}
