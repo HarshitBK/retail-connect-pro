@@ -26,6 +26,7 @@ interface SkillTest {
   location: string;
   fee: number;
   durationMinutes: number;
+  totalMarks: number;
   employerName: string;
   startsAt: string | null;
   endsAt: string | null;
@@ -54,6 +55,7 @@ const AvailableTests = () => {
           location,
           test_fee,
           duration_minutes,
+          questions,
           starts_at,
           ends_at,
           employer_profiles!inner(organization_name)
@@ -76,6 +78,13 @@ const AvailableTests = () => {
       // Get attempt counts for each test
       const testsWithInfo = await Promise.all(
         (testsData || []).map(async (test: any) => {
+          const totalMarks = Array.isArray(test.questions)
+            ? test.questions.reduce(
+                (sum: number, q: any) => sum + (Number(q.marks) || 1),
+                0
+              )
+            : 0;
+
           const { count } = await supabase
             .from("skill_test_attempts")
             .select("*", { count: "exact", head: true })
@@ -89,6 +98,7 @@ const AvailableTests = () => {
             location: test.location || "",
             fee: Number(test.test_fee) || 50,
             durationMinutes: test.duration_minutes || 60,
+             totalMarks,
             employerName: test.employer_profiles?.organization_name || "Unknown",
             startsAt: test.starts_at,
             endsAt: test.ends_at,
@@ -158,6 +168,10 @@ const AvailableTests = () => {
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Building2 className="w-4 h-4" />
                         <span>{test.employerName}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <ClipboardCheck className="w-4 h-4" />
+                        <span>Total Marks: {test.totalMarks}</span>
                       </div>
                       {test.location && (
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">

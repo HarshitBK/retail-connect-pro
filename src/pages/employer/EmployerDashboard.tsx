@@ -99,9 +99,7 @@ const EmployerDashboard = () => {
         await supabase.from("candidate_reservations")
           .update({ status: "expired" })
           .eq("id", res.id);
-        await supabase.from("employee_profiles")
-          .update({ employment_status: "available", reserved_by: null, reservation_expires_at: null })
-          .eq("id", res.employee_id);
+        // Employee status reset to available is done by DB trigger on reservation status update
       }
     }
   };
@@ -147,12 +145,7 @@ const EmployerDashboard = () => {
           hired_date: new Date().toISOString().split("T")[0],
           status: "active",
         });
-
-        await supabase.from("employee_profiles").update({
-          employment_status: "employed",
-          reserved_by: null,
-          reservation_expires_at: null,
-        }).eq("id", reservation.employee_id);
+        // Employee status set to employed by DB trigger on hired_candidates insert
 
         // Notify employee
         if (empProfile?.user_id) {
@@ -183,11 +176,7 @@ const EmployerDashboard = () => {
           });
         }
 
-        await supabase.from("employee_profiles").update({
-          employment_status: "available",
-          reserved_by: null,
-          reservation_expires_at: null,
-        }).eq("id", reservation.employee_id);
+        // Employee status set back to available by DB trigger on candidate_reservations update to not_hired
 
         // Notify employee
         if (empProfile?.user_id) {
@@ -214,15 +203,10 @@ const EmployerDashboard = () => {
 
   const handleRelease = async (hired: any) => {
     try {
-      // Update hired record
+      // Update hired record (DB trigger will set employee back to available)
       await supabase.from("hired_candidates")
         .update({ status: "released", released_at: new Date().toISOString() })
         .eq("id", hired.id);
-
-      // Make employee available again
-      await supabase.from("employee_profiles")
-        .update({ employment_status: "available", reserved_by: null })
-        .eq("id", hired.employee_id);
 
       // Notify employee
       if (hired.employee_profiles?.user_id) {
@@ -470,7 +454,7 @@ const EmployerDashboard = () => {
                                       </div>
                                       <div className="flex items-center gap-2 text-muted-foreground">
                                         <MapPin className="w-4 h-4" />
-                                        {emp?.address_line1 && `${emp.address_line1}, `}{emp?.city}, {emp?.state} {emp?.pincode ? `- ${emp.pincode}` : ""}
+                                        {emp?.city}, {emp?.state}
                                       </div>
                                       <div className="flex items-center gap-2 text-muted-foreground">
                                         <Briefcase className="w-4 h-4" />{emp?.years_of_experience || 0} years exp
@@ -627,9 +611,12 @@ const EmployerDashboard = () => {
                                       </Button>
                                     )}
                                     {isActive && (
-                                      <Button variant="outline" size="sm" onClick={() => handleRelease(hired)}>
-                                        <LogOut className="w-4 h-4 mr-1" />Release
-                                      </Button>
+                                      <div className="flex flex-col gap-0.5">
+                                        <Button variant="outline" size="sm" onClick={() => handleRelease(hired)}>
+                                          <LogOut className="w-4 h-4 mr-1" />Release
+                                        </Button>
+                                        <span className="text-xs text-muted-foreground">Release from job (candidate becomes available in Find Candidates again)</span>
+                                      </div>
                                     )}
                                     {!hired.is_blacklisted && (
                                       <Button variant="destructive" size="sm" onClick={() => { setBlacklistTarget(hired); setShowBlacklistDialog(true); }}>

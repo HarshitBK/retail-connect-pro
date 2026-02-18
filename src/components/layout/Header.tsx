@@ -1,13 +1,36 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Briefcase, Menu, X } from "lucide-react";
 import { useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, profile, signOut } = useAuth();
 
-  const isHome = location.pathname === "/";
+  const isLoggedIn = !!user;
+  const userType = profile?.userType;
+
+  const path = location.pathname;
+  const inEmployeeApp =
+    path.startsWith("/employee") && !path.startsWith("/employee/register");
+  const inEmployerApp =
+    path.startsWith("/employer") && !path.startsWith("/employer/register");
+
+  const inAppArea = isLoggedIn && (inEmployeeApp || inEmployerApp);
+
+  const dashboardPath =
+    userType === "employee" ? "/employee/dashboard" :
+    userType === "employer" ? "/employer/dashboard" :
+    "/";
+
+  const handleSignOut = async () => {
+    await signOut();
+    setIsMenuOpen(false);
+    navigate("/");
+  };
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-card/80 backdrop-blur-lg border-b border-border/50">
@@ -23,27 +46,44 @@ const Header = () => {
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-6">
-            <Link to="/" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
-              Home
-            </Link>
-            <Link to="/about" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
-              About
-            </Link>
-            <Link to="/contact" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
-              Contact
-            </Link>
-          </nav>
-
-          {/* Desktop CTA */}
-          <div className="hidden md:flex items-center gap-3">
-            <Button variant="ghost" asChild>
-              <Link to="/login">Login</Link>
-            </Button>
-            <Button variant="gradient" asChild>
-              <Link to="/register">Get Started</Link>
-            </Button>
-          </div>
+          {!inAppArea ? (
+            <>
+              <nav className="hidden md:flex items-center gap-6">
+                <Link to="/" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                  Home
+                </Link>
+                <Link to="/about" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                  About
+                </Link>
+                <Link to="/contact" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+                  Contact
+                </Link>
+              </nav>
+              <div className="hidden md:flex items-center gap-3">
+                <Button variant="ghost" asChild>
+                  <Link to="/login">Login</Link>
+                </Button>
+                <Button variant="gradient" asChild>
+                  <Link to="/">Get Started</Link>
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="hidden md:flex items-center gap-3">
+              <Button
+                variant="ghost"
+                onClick={() => navigate(dashboardPath)}
+              >
+                Dashboard
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleSignOut}
+              >
+                Sign Out
+              </Button>
+            </div>
+          )}
 
           {/* Mobile Menu Button */}
           <button
@@ -57,37 +97,59 @@ const Header = () => {
         {/* Mobile Menu */}
         {isMenuOpen && (
           <div className="md:hidden py-4 border-t border-border/50 animate-fade-in">
-            <nav className="flex flex-col gap-2">
-              <Link
-                to="/"
-                className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                Home
-              </Link>
-              <Link
-                to="/about"
-                className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                About
-              </Link>
-              <Link
-                to="/contact"
-                className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
-                onClick={() => setIsMenuOpen(false)}
-              >
-                Contact
-              </Link>
-              <div className="flex flex-col gap-2 mt-4 px-4">
-                <Button variant="outline" asChild>
-                  <Link to="/login" onClick={() => setIsMenuOpen(false)}>Login</Link>
+            {!inAppArea ? (
+              <nav className="flex flex-col gap-2">
+                <Link
+                  to="/"
+                  className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Home
+                </Link>
+                <Link
+                  to="/about"
+                  className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  About
+                </Link>
+                <Link
+                  to="/contact"
+                  className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Contact
+                </Link>
+                <div className="flex flex-col gap-2 mt-4 px-4">
+                  <Button variant="outline" asChild>
+                    <Link to="/login" onClick={() => setIsMenuOpen(false)}>Login</Link>
+                  </Button>
+                  <Button variant="gradient" asChild>
+                    <Link to="/" onClick={() => setIsMenuOpen(false)}>Get Started</Link>
+                  </Button>
+                </div>
+              </nav>
+            ) : (
+              <nav className="flex flex-col gap-2">
+                <Button
+                  variant="ghost"
+                  className="justify-start px-4"
+                  onClick={() => {
+                    navigate(dashboardPath);
+                    setIsMenuOpen(false);
+                  }}
+                >
+                  Dashboard
                 </Button>
-                <Button variant="gradient" asChild>
-                  <Link to="/register" onClick={() => setIsMenuOpen(false)}>Get Started</Link>
+                <Button
+                  variant="outline"
+                  className="justify-start mx-4"
+                  onClick={handleSignOut}
+                >
+                  Sign Out
                 </Button>
-              </div>
-            </nav>
+              </nav>
+            )}
           </div>
         )}
       </div>

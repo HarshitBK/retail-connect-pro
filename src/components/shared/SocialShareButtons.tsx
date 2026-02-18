@@ -12,23 +12,23 @@ interface SocialShareButtonsProps {
 const MESSAGES = {
   employee: {
     whatsapp: (url: string) =>
-      `🛍️ I just registered on RetailHire - India's #1 retail job portal!\n\nI'm looking for exciting opportunities in the retail industry. If you're a job seeker too, register now and get verified by top employers!\n\n👉 Register here: ${url}\n\n✅ Free registration\n✅ Get certified & earn points\n✅ Connect with top retail brands\n\n#RetailHire #RetailJobs #JobSearch`,
+      `🛍️ I just registered on RetailHire - India's #1 retail job portal!\n\nI'm looking for exciting opportunities in the retail industry. If you're a job seeker too, use my referral link to register – we both earn bonus points!\n\n🔗 My referral link: ${url}\n\n✅ Free registration\n✅ Get certified & earn points\n✅ Connect with top retail brands\n\n#RetailHire #RetailJobs #JobSearch`,
     twitter: (url: string) =>
-      `🛍️ Just registered on @RetailHire - India's #1 retail job portal! Looking for my next opportunity in retail. Job seekers, check it out! 👉 ${url}`,
+      `🛍️ Just registered on @RetailHire - India's #1 retail job portal! Use my link to sign up and we both earn points 👉 ${url}`,
     linkedin: (url: string) =>
-      `I'm excited to share that I've registered on RetailHire - India's leading retail job portal! 🛍️\n\nRetailHire connects verified retail professionals with top employers across India. If you're looking for opportunities in the retail industry or know someone who is, I highly recommend checking it out.\n\n🔗 Register here: ${url}\n\n#RetailHire #RetailJobs #Hiring #CareerGrowth`,
+      `I've registered on RetailHire - India's leading retail job portal! 🛍️ Use my referral link to join and we both earn bonus points.\n\n🔗 My referral link: ${url}\n\n#RetailHire #RetailJobs #Hiring #CareerGrowth`,
     facebook: (url: string) =>
-      `🛍️ I just joined RetailHire - India's #1 retail hiring platform!\n\nIf you're looking for retail jobs or know someone who is, register for free and get discovered by top employers!\n\n👉 ${url}`,
+      `🛍️ I just joined RetailHire - India's #1 retail hiring platform! Use my referral link to register and we both earn points:\n\n👉 ${url}`,
   },
   employer: {
     whatsapp: (url: string) =>
-      `🎯 We're Hiring! Our company is using RetailHire to find the best retail talent in India!\n\nIf you or someone you know is looking for retail jobs (sales, store management, inventory, etc.), register now:\n\n👉 ${url}\n\n✅ Free registration for job seekers\n✅ Skill tests & certifications\n✅ Get hired by top brands\n\n#NowHiring #RetailJobs #RetailHire`,
+      `🎯 We're Hiring! Our company uses RetailHire to find the best retail talent in India. Share this referral link with job seekers – they get free registration and can take our skill tests!\n\n🔗 Referral link: ${url}\n\n✅ Free registration for job seekers\n✅ Skill tests & certifications\n✅ Get hired by top brands\n\n#NowHiring #RetailJobs #RetailHire`,
     twitter: (url: string) =>
-      `🎯 We're hiring! Looking for skilled retail professionals through @RetailHire. Job seekers, register now and take our skill tests! 👉 ${url} #NowHiring #RetailJobs`,
+      `🎯 We're hiring! Looking for skilled retail professionals through @RetailHire. Job seekers, use our link to register and take our skill tests! 👉 ${url} #NowHiring #RetailJobs`,
     linkedin: (url: string) =>
-      `🎯 We're Hiring Through RetailHire!\n\nOur organization is actively looking for skilled retail professionals. We use RetailHire to find verified, certified candidates who match our requirements.\n\nIf you're a retail professional looking for your next opportunity, register on RetailHire today:\n\n🔗 ${url}\n\nBenefits for job seekers:\n✅ Free profile creation\n✅ Skill certifications\n✅ Direct connection with employers\n✅ Earn rewards & referral points\n\n#NowHiring #RetailJobs #RetailHire #Careers`,
+      `🎯 We're Hiring Through RetailHire!\n\nOur organization is looking for skilled retail professionals. Share this link with candidates to register:\n\n🔗 ${url}\n\n#NowHiring #RetailJobs #RetailHire #Careers`,
     facebook: (url: string) =>
-      `🎯 We're Hiring! Looking for talented retail professionals!\n\nRegister on RetailHire and apply for exciting roles at our company. Free registration, skill tests, and instant connections with employers!\n\n👉 ${url}`,
+      `🎯 We're Hiring! Share this link with retail job seekers – free registration and direct connection with our company:\n\n👉 ${url}`,
   },
 };
 

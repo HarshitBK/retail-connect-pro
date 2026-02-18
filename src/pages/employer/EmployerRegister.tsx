@@ -306,32 +306,21 @@ const EmployerRegister = () => {
 
   const handleReferralReward = async (newUserId: string, referralCode: string) => {
     try {
+      const REFERRAL_BONUS_POINTS = 10;
       const { data: referrer } = await supabase
         .from("profiles")
         .select("id")
-        .eq("referral_code", referralCode)
+        .eq("referral_code", referralCode.trim().toUpperCase())
         .maybeSingle();
 
-      if (referrer) {
-        await supabase.from("referral_rewards").insert([{
-          referrer_user_id: referrer.id,
-          referred_user_id: newUserId,
-          points_awarded: 15,
-        }]);
+      if (!referrer) return;
 
-        const { data: rewards } = await supabase
-          .from("reward_points")
-          .select("id, points")
-          .eq("user_id", referrer.id)
-          .maybeSingle();
-
-        if (rewards) {
-          await supabase
-            .from("reward_points")
-            .update({ points: (rewards.points || 0) + 15 })
-            .eq("id", rewards.id);
-        }
-      }
+      await supabase.from("referral_rewards").insert({
+        referrer_user_id: referrer.id,
+        referred_user_id: newUserId,
+        points_awarded: REFERRAL_BONUS_POINTS,
+      });
+      // DB trigger credits referrer's reward_points and sends them a notification
     } catch (err) {
       console.error("Referral error:", err);
     }

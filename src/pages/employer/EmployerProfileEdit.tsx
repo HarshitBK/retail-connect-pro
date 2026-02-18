@@ -65,15 +65,16 @@ const EmployerProfileEdit = () => {
   useEffect(() => {
     const fetchProfile = async () => {
       if (!user) return;
-      
+
       const { data } = await supabase
         .from("employer_profiles")
         .select("*")
         .eq("user_id", user.id)
         .maybeSingle();
-      
+
       if (data) {
-        setFormData({
+        setFormData((prev) => ({
+          ...prev,
           organizationName: data.organization_name || "",
           organizationType: data.organization_type || "",
           gstNumber: data.gst_number || "",
@@ -84,20 +85,21 @@ const EmployerProfileEdit = () => {
           website: data.website || "",
           addressLine1: data.address_line1 || "",
           addressLine2: data.address_line2 || "",
+          // store state and city as names so existing data shows up
           stateId: data.state || "",
-          stateName: "",
+          stateName: data.state || "",
           cityId: data.city || "",
-          cityName: "",
+          cityName: data.city || "",
           pincode: data.pincode || "",
           retailCategories: (data.retail_categories as string[]) || [],
           contactPersonName: data.contact_person_name || "",
           contactPersonDesignation: data.contact_person_designation || "",
           contactPersonEmail: data.contact_person_email || "",
           contactPersonPhone: data.contact_person_phone || "",
-        });
+        }));
       }
     };
-    
+
     fetchProfile();
   }, [user]);
 
@@ -108,31 +110,31 @@ const EmployerProfileEdit = () => {
     }
   };
 
-  const handleStateChange = async (stateId: string) => {
-    const state = states.find((s) => s.id === stateId);
+  const handleStateChange = async (stateValue: string) => {
+    const state = states.find((s) => s.id === stateValue || s.name === stateValue);
     if (!state) return;
 
     setFormData((prev) => ({
       ...prev,
-      stateId,
+      stateId: state.name,
       stateName: state.name,
       cityId: "",
       cityName: "",
     }));
 
     setLoadingCities(true);
-    const cities = await fetchCitiesByState(stateId);
+    const cities = await fetchCitiesByState(state.id);
     setAvailableCities(cities.map((c) => ({ id: c.id, name: c.name })));
     setLoadingCities(false);
   };
 
-  const handleCityChange = (cityId: string) => {
-    const city = availableCities.find((c) => c.id === cityId);
+  const handleCityChange = (cityValue: string) => {
+    const city = availableCities.find((c) => c.id === cityValue || c.name === cityValue);
     if (!city) return;
 
     setFormData((prev) => ({
       ...prev,
-      cityId,
+      cityId: city.name,
       cityName: city.name,
     }));
   };
@@ -368,7 +370,7 @@ const EmployerProfileEdit = () => {
                           <SelectContent>
                             <ScrollArea className="h-60">
                               {states.map((state) => (
-                                <SelectItem key={state.id} value={state.id}>
+                                <SelectItem key={state.id} value={state.name}>
                                   {state.name}
                                 </SelectItem>
                               ))}
@@ -391,7 +393,7 @@ const EmployerProfileEdit = () => {
                           <SelectContent>
                             <ScrollArea className="h-60">
                               {availableCities.map((city) => (
-                                <SelectItem key={city.id} value={city.id}>
+                                <SelectItem key={city.id} value={city.name}>
                                   {city.name}
                                 </SelectItem>
                               ))}

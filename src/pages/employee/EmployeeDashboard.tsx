@@ -25,6 +25,7 @@ const EmployeeDashboard = () => {
   const [testCount, setTestCount] = useState(0);
   const [certCount, setCertCount] = useState(0);
   const [loadingData, setLoadingData] = useState(true);
+  const [activeTab, setActiveTab] = useState<"notifications" | "certifications" | "rewards">("notifications");
 
   useEffect(() => {
     if (user) {
@@ -187,8 +188,14 @@ const EmployeeDashboard = () => {
                     <div className="flex items-center gap-2"><Wallet className="w-5 h-5 text-primary" /><span className="font-medium">Wallet</span></div>
                     <span className="text-xl font-bold text-primary">₹{wallet?.balance || 0}</span>
                   </div>
-                  <Button variant="outline" className="w-full" size="sm" asChild>
-                    <Link to="/rewards"><Gift className="w-4 h-4 mr-2" />View Rewards</Link>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    size="sm"
+                    onClick={() => setActiveTab("rewards")}
+                  >
+                    <Gift className="w-4 h-4 mr-2" />
+                    View Rewards
                   </Button>
                 </CardContent>
               </Card>
@@ -214,14 +221,14 @@ const EmployeeDashboard = () => {
 
               <div className="grid md:grid-cols-2 gap-4">
                 <Button variant="hero" size="lg" asChild>
-                  <Link to="/available-tests"><BookOpen className="w-5 h-5 mr-2" />Browse Skill Tests</Link>
+                  <Link to="/tests"><BookOpen className="w-5 h-5 mr-2" />Browse Skill Tests</Link>
                 </Button>
                 <Button variant="outline" size="lg" asChild>
                   <Link to="/certifications"><Award className="w-5 h-5 mr-2" />Get Certified</Link>
                 </Button>
               </div>
 
-              <Tabs defaultValue="notifications" className="w-full">
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="notifications">
                     <Bell className="w-4 h-4 mr-2" />Notifications {unreadCount > 0 && `(${unreadCount})`}

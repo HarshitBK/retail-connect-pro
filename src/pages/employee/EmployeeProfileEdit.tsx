@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ArrowLeft, Loader2, Save, User } from "lucide-react";
+import { ArrowLeft, Loader2, Save, User, FileText } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useIndianLocations } from "@/hooks/useIndianLocations";
@@ -65,30 +65,34 @@ const EmployeeProfileEdit = () => {
     bankName: "",
     bankAccountNumber: "",
     bankIfsc: "",
+    resume: null as File | null,
+    resumeUrl: "",
   });
 
   useEffect(() => {
     const fetchProfile = async () => {
       if (!user) return;
-      
+
       const { data } = await supabase
         .from("employee_profiles")
         .select("*")
         .eq("user_id", user.id)
         .maybeSingle();
-      
+
       if (data) {
-        setFormData({
+        setFormData((prev) => ({
+          ...prev,
           fullName: data.full_name || "",
           phone: profile?.phone || "",
           dateOfBirth: data.date_of_birth || "",
           gender: data.gender || "",
           addressLine1: data.address_line1 || "",
           addressLine2: data.address_line2 || "",
+          // store state and city as names so existing data shows up
           stateId: data.state || "",
-          stateName: "",
+          stateName: data.state || "",
           cityId: data.city || "",
-          cityName: "",
+          cityName: data.city || "",
           pincode: data.pincode || "",
           educationLevel: data.education_level || "",
           educationDetails: data.education_details || "",
@@ -102,10 +106,12 @@ const EmployeeProfileEdit = () => {
           bankName: data.bank_name || "",
           bankAccountNumber: data.bank_account_number || "",
           bankIfsc: data.bank_ifsc || "",
-        });
+          resume: null,
+          resumeUrl: data.resume_url || "",
+        }));
       }
     };
-    
+
     fetchProfile();
   }, [user, profile]);
 
@@ -116,31 +122,31 @@ const EmployeeProfileEdit = () => {
     }
   };
 
-  const handleStateChange = async (stateId: string) => {
-    const state = states.find((s) => s.id === stateId);
+  const handleStateChange = async (stateValue: string) => {
+    const state = states.find((s) => s.id === stateValue || s.name === stateValue);
     if (!state) return;
 
     setFormData((prev) => ({
       ...prev,
-      stateId,
+      stateId: state.name,
       stateName: state.name,
       cityId: "",
       cityName: "",
     }));
 
     setLoadingCities(true);
-    const cities = await fetchCitiesByState(stateId);
+    const cities = await fetchCitiesByState(state.id);
     setAvailableCities(cities.map((c) => ({ id: c.id, name: c.name })));
     setLoadingCities(false);
   };
 
-  const handleCityChange = (cityId: string) => {
-    const city = availableCities.find((c) => c.id === cityId);
+  const handleCityChange = (cityValue: string) => {
+    const city = availableCities.find((c) => c.id === cityValue || c.name === cityValue);
     if (!city) return;
 
     setFormData((prev) => ({
       ...prev,
-      cityId,
+      cityId: city.name,
       cityName: city.name,
     }));
   };
@@ -195,12 +201,20 @@ const EmployeeProfileEdit = () => {
     setLoading(true);
 
     try {
-      // Update profile phone
       if (formData.phone !== profile?.phone) {
         await supabase.from("profiles").update({ phone: formData.phone }).eq("id", user.id);
       }
 
-      // Update employee profile
+      let resumeUrl: string | null = formData.resumeUrl || null;
+      if (formData.resume) {
+        const ext = formData.resume.name.split(".").pop() || "pdf";
+        const path = `${user.id}/resume_${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage.from("documents").upload(path, formData.resume, { upsert: true });
+        if (uploadError) throw uploadError;
+        const { data: urlData } = supabase.storage.from("documents").getPublicUrl(path);
+        resumeUrl = urlData.publicUrl;
+      }
+
       const { error } = await supabase
         .from("employee_profiles")
         .update({
@@ -224,6 +238,7 @@ const EmployeeProfileEdit = () => {
           bank_name: formData.bankName || null,
           bank_account_number: formData.bankAccountNumber || null,
           bank_ifsc: formData.bankIfsc || null,
+          resume_url: resumeUrl,
         })
         .eq("user_id", user.id);
 
@@ -263,7 +278,9 @@ const EmployeeProfileEdit = () => {
               <h1 className="font-display text-2xl md:text-3xl font-bold text-foreground">
                 Edit Profile
               </h1>
-              <p className="text-muted-foreground">Update your personal and professional details</p>
+              <p className="text-muted-foreground">
+                Keep your details and resume up to date so employers see your best profile.
+              </p>
             </div>
           </div>
 
@@ -358,7 +375,7 @@ const EmployeeProfileEdit = () => {
                           <SelectContent>
                             <ScrollArea className="h-60">
                               {states.map((state) => (
-                                <SelectItem key={state.id} value={state.id}>
+                                <SelectItem key={state.id} value={state.name}>
                                   {state.name}
                                 </SelectItem>
                               ))}
@@ -381,7 +398,7 @@ const EmployeeProfileEdit = () => {
                           <SelectContent>
                             <ScrollArea className="h-60">
                               {availableCities.map((city) => (
-                                <SelectItem key={city.id} value={city.id}>
+                                <SelectItem key={city.id} value={city.name}>
                                   {city.name}
                                 </SelectItem>
                               ))}
@@ -503,6 +520,35 @@ const EmployeeProfileEdit = () => {
                   onChange={(cities) => handleInputChange("preferredWorkCities", cities)}
                   maxCities={5}
                 />
+              </CardContent>
+            </Card>
+
+            {/* Resume / CV */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="w-5 h-5" />
+                  Resume / CV
+                </CardTitle>
+                <CardDescription>Keep your resume updated so employers see your latest experience. You can replace it anytime.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <DocumentUpload
+                  label="Upload new Resume/CV (optional – replace current)"
+                  accept=".pdf,.doc,.docx"
+                  value={formData.resume}
+                  existingUrl={formData.resumeUrl || undefined}
+                  onChange={(file) => setFormData((prev) => ({ ...prev, resume: file }))}
+                  helpText="PDF or Word, max 5MB. Employers see this when you're reserved."
+                />
+                {formData.resumeUrl && !formData.resume && (
+                  <p className="text-sm text-muted-foreground mt-2">
+                    <a href={formData.resumeUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                      View current resume
+                    </a>
+                    {" · "}Upload a new file above to replace it.
+                  </p>
+                )}
               </CardContent>
             </Card>
 

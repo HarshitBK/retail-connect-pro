@@ -36,6 +36,7 @@ import EmployerProfileEdit from "./pages/employer/EmployerProfileEdit";
 import FindCandidates from "./pages/employer/FindCandidates";
 import CreateTest from "./pages/employer/CreateTest";
 import ViewTests from "./pages/employer/ViewTests";
+import EditTest from "./pages/employer/EditTest";
 import TestResults from "./pages/employer/TestResults";
 
 const queryClient = new QueryClient();
@@ -133,6 +134,14 @@ const App = () => (
               element={
                 <ProtectedRoute userType="employer">
                   <CreateTest />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/employer/tests/:testId/edit" 
+              element={
+                <ProtectedRoute userType="employer">
+                  <EditTest />
                 </ProtectedRoute>
               } 
             />

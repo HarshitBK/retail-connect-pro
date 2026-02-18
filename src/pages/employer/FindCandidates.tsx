@@ -18,6 +18,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { RETAIL_CATEGORIES, SKILL_OPTIONS, EDUCATION_LEVELS } from "@/lib/constants";
 import { useIndianLocations } from "@/hooks/useIndianLocations";
+import type { Tables } from "@/integrations/supabase/types";
+import CitySelector, { SelectedCityItem } from "@/components/shared/CitySelector";
 
 interface Candidate {
   id: string;
@@ -31,6 +33,7 @@ interface Candidate {
   employmentStatus: string;
   gender: string;
   profileCompletion: number;
+  preferredWorkCities: SelectedCityItem[];
 }
 
 const FindCandidates = () => {
@@ -45,55 +48,87 @@ const FindCandidates = () => {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const [filters, setFilters] = useState({
-    state: "", city: "", experience: "", education: "",
-    gender: "", retailCategory: "", skills: [] as string[],
+    cities: [] as SelectedCityItem[],
+    experience: "",
+    education: "",
+    gender: "",
+    retailCategory: "",
+    skills: [] as string[],
   });
 
-  const [availableCities, setAvailableCities] = useState<{ id: string; name: string }[]>([]);
-  const [loadingCities, setLoadingCities] = useState(false);
-
   useEffect(() => { fetchCandidates(); }, []);
-
-  useEffect(() => {
-    if (filters.state) {
-      loadCities(filters.state);
-    }
-  }, [filters.state]);
-
-  const loadCities = async (stateName: string) => {
-    setLoadingCities(true);
-    const state = states.find(s => s.name === stateName);
-    if (state) {
-      const cities = await fetchCitiesByState(state.id);
-      setAvailableCities(cities);
-    }
-    setLoadingCities(false);
-  };
 
   const fetchCandidates = async () => {
     setLoading(true);
     try {
-      // Only show available candidates (not reserved, not employed, not blacklisted)
+      // Run expiry check so reservations past 5 days are reverted to available (optional; may not exist in all projects)
+      try {
+        await supabase.rpc("check_expired_reservations");
+      } catch {
+        // RPC might not exist or be permitted; ignore
+      }
+
+      // Additionally, explicitly exclude candidates that have:
+      // - an active/pending reservation that has not yet expired
+      // - an active hire within the last 30 days
+      const nowIso = new Date().toISOString();
+      const thirtyDaysAgoIso = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+      const [
+        { data: pendingReservations },
+        { data: recentHires },
+      ] = await Promise.all([
+        supabase
+          .from("candidate_reservations")
+          .select("employee_id, expires_at, status")
+          .eq("status", "pending")
+          .gt("expires_at", nowIso),
+        supabase
+          .from("hired_candidates")
+          .select("employee_id, hired_date, status")
+          .eq("status", "active")
+          .gt("hired_date", thirtyDaysAgoIso),
+      ]);
+
+      const blockedEmployeeIds = new Set<string>();
+      (pendingReservations as Pick<Tables<"candidate_reservations">, "employee_id">[] | null || []).forEach(
+        (r) => blockedEmployeeIds.add(r.employee_id)
+      );
+      (recentHires as Pick<Tables<"hired_candidates">, "employee_id">[] | null || []).forEach(
+        (h) => blockedEmployeeIds.add(h.employee_id)
+      );
+
+      // Only show available candidates (reserved/hired are set by DB triggers and have different status)
       const { data, error } = await supabase
         .from("employee_profiles")
-        .select("id, skills, retail_categories, years_of_experience, education_level, city, state, employment_status, gender, profile_completion_percent")
+        .select("id, skills, retail_categories, years_of_experience, education_level, city, state, employment_status, gender, profile_completion_percent, preferred_work_cities")
         .eq("is_blacklisted", false)
         .eq("employment_status", "available");
 
       if (error) throw error;
 
-      const formattedCandidates: Candidate[] = (data || []).map((emp, idx) => ({
-        id: emp.id,
+      const visibleEmployees = (data || []).filter(
+        (emp) => !blockedEmployeeIds.has(emp.id as string)
+      );
+
+      const formattedCandidates: Candidate[] = visibleEmployees.map((emp, idx) => ({
+        id: emp.id as string,
         index: idx + 1,
         skills: (emp.skills as string[]) || [],
         retailCategories: (emp.retail_categories as string[]) || [],
-        experience: emp.years_of_experience || 0,
-        educationLevel: emp.education_level || "",
-        city: emp.city || "",
-        state: emp.state || "",
-        employmentStatus: emp.employment_status || "available",
-        gender: emp.gender || "",
-        profileCompletion: emp.profile_completion_percent || 0,
+        experience: (emp.years_of_experience as number) || 0,
+        educationLevel: (emp.education_level as string) || "",
+        city: (emp.city as string) || "",
+        state: (emp.state as string) || "",
+        employmentStatus: (emp.employment_status as string) || "available",
+        gender: (emp.gender as string) || "",
+        profileCompletion: (emp.profile_completion_percent as number) || 0,
+        preferredWorkCities:
+          ((emp.preferred_work_cities as any[]) || []).map((c) => ({
+            cityId: c.cityId || c.city_id || "",
+            cityName: c.cityName || c.city_name || c.city || "",
+            stateName: c.stateName || c.state_name || "",
+          })) || [],
       }));
 
       setCandidates(formattedCandidates);
@@ -106,8 +141,12 @@ const FindCandidates = () => {
   };
 
   const filteredCandidates = candidates.filter(candidate => {
-    if (filters.state && candidate.state.toLowerCase() !== filters.state.toLowerCase()) return false;
-    if (filters.city && candidate.city.toLowerCase() !== filters.city.toLowerCase()) return false;
+    if (filters.cities.length > 0) {
+      const selectedCityNames = filters.cities.map(c => c.cityName.toLowerCase());
+      const preferredCityNames = (candidate.preferredWorkCities || []).map(c => c.cityName.toLowerCase());
+      const hasMatch = preferredCityNames.some(name => selectedCityNames.includes(name));
+      if (!hasMatch) return false;
+    }
     if (filters.education && candidate.educationLevel !== filters.education) return false;
     if (filters.gender && candidate.gender.toLowerCase() !== filters.gender.toLowerCase()) return false;
     if (filters.retailCategory && !candidate.retailCategories.includes(filters.retailCategory)) return false;
@@ -166,15 +205,9 @@ const FindCandidates = () => {
       const { error: resError } = await supabase.from("candidate_reservations").insert(reservations);
       if (resError) throw resError;
 
-      // Update each employee status to reserved
+      // Employee status is set to reserved by DB trigger on candidate_reservations insert.
+      // Notify each employee about reservation
       for (const empId of selectedCandidates) {
-        await supabase.from("employee_profiles").update({
-          employment_status: "reserved",
-          reserved_by: employerProfile.id,
-          reservation_expires_at: expiresAt,
-        }).eq("id", empId);
-
-        // Notify employee about reservation
         const { data: empData } = await supabase.from("employee_profiles").select("user_id").eq("id", empId).single();
         if (empData?.user_id) {
           await supabase.from("notifications").insert({
@@ -229,7 +262,7 @@ const FindCandidates = () => {
   const getCategoryLabel = (val: string) => RETAIL_CATEGORIES.find(c => c.value === val)?.label || val;
 
   const clearFilters = () => {
-    setFilters({ state: "", city: "", experience: "", education: "", gender: "", retailCategory: "", skills: [] });
+    setFilters({ cities: [], experience: "", education: "", gender: "", retailCategory: "", skills: [] });
   };
 
   return (
@@ -251,27 +284,12 @@ const FindCandidates = () => {
                 <CardContent className="pt-6 space-y-4">
                   <h3 className="text-lg font-semibold flex items-center gap-2"><Filter className="w-5 h-5" />Filters</h3>
 
-                  <div className="space-y-2">
-                    <Label>State</Label>
-                    <Select value={filters.state} onValueChange={v => setFilters(prev => ({ ...prev, state: v, city: "" }))}>
-                      <SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger>
-                      <SelectContent>
-                        {states.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {filters.state && (
-                    <div className="space-y-2">
-                      <Label>City</Label>
-                      <Select value={filters.city} onValueChange={v => setFilters(prev => ({ ...prev, city: v }))}>
-                        <SelectTrigger><SelectValue placeholder={loadingCities ? "Loading..." : "Select city"} /></SelectTrigger>
-                        <SelectContent>
-                          {availableCities.map(c => <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
+                  <CitySelector
+                    selectedCities={filters.cities}
+                    onChange={(cities) => setFilters(prev => ({ ...prev, cities }))}
+                    maxCities={10}
+                    label="Preferred Cities"
+                  />
 
                   <div className="space-y-2">
                     <Label>Retail Category</Label>
@@ -321,8 +339,9 @@ const FindCandidates = () => {
 
                   <div className="space-y-2">
                     <Label>Skills</Label>
+                    <p className="text-xs text-muted-foreground">Select one or more</p>
                     <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
-                      {SKILL_OPTIONS.slice(0, 8).map(skill => (
+                      {SKILL_OPTIONS.map(skill => (
                         <Badge
                           key={skill}
                           variant={filters.skills.includes(skill) ? "default" : "outline"}
@@ -382,27 +401,36 @@ const FindCandidates = () => {
                           <div className="flex-1 min-w-0">
                             <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                               <div className="space-y-3">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-semibold text-foreground">Candidate #{String(candidate.index).padStart(4, "0")}</span>
                                   <Badge variant="outline" className="text-success border-success"><CheckCircle2 className="w-3 h-3 mr-1" />Available</Badge>
+                                  {candidate.gender && (
+                                    <Badge variant="outline" className="text-xs capitalize">{candidate.gender}</Badge>
+                                  )}
                                   {candidate.profileCompletion >= 80 && <Badge variant="secondary">Verified Profile</Badge>}
                                 </div>
 
                                 {candidate.retailCategories.length > 0 && (
-                                  <div className="flex flex-wrap gap-1">
-                                    {candidate.retailCategories.slice(0, 3).map((cat, i) => (
-                                      <Badge key={i} variant="default" className="text-xs">{getCategoryLabel(cat)}</Badge>
-                                    ))}
-                                    {candidate.retailCategories.length > 3 && <Badge variant="outline" className="text-xs">+{candidate.retailCategories.length - 3} more</Badge>}
+                                  <div>
+                                    <span className="text-xs font-medium text-muted-foreground">Retail Specialization: </span>
+                                    <div className="flex flex-wrap gap-1 mt-0.5">
+                                      {candidate.retailCategories.map((cat, i) => (
+                                        <Badge key={i} variant="default" className="text-xs">{getCategoryLabel(cat)}</Badge>
+                                      ))}
+                                    </div>
                                   </div>
                                 )}
 
-                                <div className="flex flex-wrap gap-1">
-                                  {candidate.skills.slice(0, 4).map((skill, i) => (
-                                    <Badge key={i} variant="secondary" className="text-xs">{skill}</Badge>
-                                  ))}
-                                  {candidate.skills.length > 4 && <Badge variant="outline" className="text-xs">+{candidate.skills.length - 4}</Badge>}
-                                </div>
+                                {candidate.skills.length > 0 && (
+                                  <div>
+                                    <span className="text-xs font-medium text-muted-foreground">Skills: </span>
+                                    <div className="flex flex-wrap gap-1 mt-0.5">
+                                      {candidate.skills.map((skill, i) => (
+                                        <Badge key={i} variant="secondary" className="text-xs">{skill}</Badge>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
 
                                 <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
                                   <div className="flex items-center gap-1"><Briefcase className="w-4 h-4" />{getExperienceLabel(candidate.experience)}</div>

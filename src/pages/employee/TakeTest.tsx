@@ -68,21 +68,31 @@ const TakeTest = () => {
         .from("skill_tests")
         .select("*")
         .eq("id", testId)
-        .single();
+        .eq("status", "published")
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) {
+        setTest(null);
+        setQuestions([]);
+        setLoading(false);
+        return;
+      }
       setTest(data);
-      const parsedQuestions = (data.questions as any[] || []).map((q: any, i: number) => ({
+      const rawQuestions = (data.questions as any[] || []);
+      const parsedQuestions = rawQuestions.map((q: any, i: number) => ({
         id: i,
         question: q.question || `Question ${i + 1}`,
-        options: q.options || [],
-        correctAnswer: q.correctAnswer ?? 0,
+        options: Array.isArray(q.options) ? q.options : [],
+        correctAnswer: typeof q.correctAnswer === "number" ? q.correctAnswer : 0,
       }));
       setQuestions(parsedQuestions);
       setTimeLeft((data.duration_minutes || 60) * 60);
     } catch (error) {
       console.error("Error:", error);
-      toast({ title: "Error", description: "Failed to load test", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to load test. It may no longer be available.", variant: "destructive" });
+      setTest(null);
+      setQuestions([]);
     } finally {
       setLoading(false);
     }
@@ -129,10 +139,12 @@ const TakeTest = () => {
         answers: answers,
         completed_at: new Date().toISOString(),
       }).eq("id", attemptId);
-
-      setResult({ score, total: questions.length, passed });
-      setShowResultDialog(true);
       setTestStarted(false);
+      toast({
+        title: "Test submitted",
+        description: "Your answers have been submitted for evaluation.",
+      });
+      navigate("/employee/dashboard");
     } catch (error: any) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
@@ -163,7 +175,9 @@ const TakeTest = () => {
           <div className="container mx-auto px-4 max-w-2xl text-center">
             <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
             <h2 className="text-xl font-semibold mb-2">Test Not Available</h2>
-            <p className="text-muted-foreground mb-4">This test doesn't have any questions yet.</p>
+            <p className="text-muted-foreground mb-4">
+              {!test ? "This test was not found or is no longer available. It may be closed or removed." : "This test doesn't have any questions yet."}
+            </p>
             <Button onClick={() => navigate("/tests")}>Browse Other Tests</Button>
           </div>
         </main>
@@ -334,36 +348,7 @@ const TakeTest = () => {
         </div>
       </main>
 
-      {/* Result Dialog */}
-      <Dialog open={showResultDialog} onOpenChange={setShowResultDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="text-center text-2xl">
-              {result?.passed ? "🎉 Congratulations!" : "😔 Better Luck Next Time"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="text-center space-y-4 py-4">
-            <div className={`w-24 h-24 rounded-full flex items-center justify-center mx-auto ${
-              result?.passed ? "bg-success/10" : "bg-destructive/10"
-            }`}>
-              <span className={`text-3xl font-bold ${result?.passed ? "text-success" : "text-destructive"}`}>
-                {result?.score}%
-              </span>
-            </div>
-            <p className="text-muted-foreground">
-              You answered {Object.keys(answers).length} out of {questions.length} questions.
-              {result?.passed ? " You passed!" : ` You needed ${test?.passing_score}% to pass.`}
-            </p>
-            {result?.passed && (
-              <Badge className="bg-success text-success-foreground"><CheckCircle2 className="w-4 h-4 mr-1" />Test Passed</Badge>
-            )}
-          </div>
-          <DialogFooter className="flex-col gap-2 sm:flex-row">
-            <Button variant="outline" onClick={() => navigate("/tests")} className="w-full sm:w-auto">Browse More Tests</Button>
-            <Button onClick={() => navigate("/employee/dashboard")} className="w-full sm:w-auto">Go to Dashboard</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Result Dialog intentionally removed for employees (results visible only to employers) */}
     </div>
   );
 };

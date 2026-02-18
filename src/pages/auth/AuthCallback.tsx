@@ -193,38 +193,23 @@ function calculateEmployeeCompletion(data: any): number {
   return Math.min(score, 100);
 }
 
-// Handle referral reward
+// Handle referral reward: insert referral_rewards; DB trigger credits 10 pts to referrer and sends notification
 async function handleReferralReward(newUserId: string, referralCode: string) {
   try {
-    // Find the referrer by their referral code
+    const REFERRAL_BONUS_POINTS = 10;
     const { data: referrer } = await supabase
       .from("profiles")
       .select("id")
-      .eq("referral_code", referralCode)
+      .eq("referral_code", (referralCode || "").trim().toUpperCase())
       .maybeSingle();
 
-    if (referrer) {
-      // Create referral reward record
-      await supabase.from("referral_rewards").insert({
-        referrer_user_id: referrer.id,
-        referred_user_id: newUserId,
-        points_awarded: 15,
-      });
+    if (!referrer) return;
 
-      // Add points to referrer's reward_points
-      const { data: rewards } = await supabase
-        .from("reward_points")
-        .select("id, points")
-        .eq("user_id", referrer.id)
-        .maybeSingle();
-
-      if (rewards) {
-        await supabase
-          .from("reward_points")
-          .update({ points: (rewards.points || 0) + 15 })
-          .eq("id", rewards.id);
-      }
-    }
+    await supabase.from("referral_rewards").insert({
+      referrer_user_id: referrer.id,
+      referred_user_id: newUserId,
+      points_awarded: REFERRAL_BONUS_POINTS,
+    });
   } catch (err) {
     console.error("Error handling referral:", err);
   }

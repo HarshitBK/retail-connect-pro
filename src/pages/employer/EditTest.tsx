@@ -1,26 +1,19 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useParams, Link } from "react-router-dom";
 import Header from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from "@/components/ui/select";
-import { 
-  ArrowLeft, 
-  Plus, 
-  Trash2, 
-  Save, 
-  Eye, 
+import {
+  ArrowLeft,
+  Plus,
+  Trash2,
+  Save,
+  Eye,
   Loader2,
-  GripVertical
+  GripVertical,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -34,12 +27,14 @@ interface Question {
   marks: number;
 }
 
-const CreateTest = () => {
+const EditTest = () => {
+  const { testId } = useParams<{ testId: string }>();
   const navigate = useNavigate();
-  const { user, employerProfile } = useAuth();
+  const { employerProfile } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  
+  const [loadingTest, setLoadingTest] = useState(true);
+
   const [testData, setTestData] = useState({
     title: "",
     description: "",
@@ -50,82 +45,100 @@ const CreateTest = () => {
   });
 
   const [questions, setQuestions] = useState<Question[]>([
-    {
-      id: crypto.randomUUID(),
-      question: "",
-      options: ["", "", "", ""],
-      correctAnswer: 0,
-      marks: 1,
-    },
+    { id: crypto.randomUUID(), question: "", options: ["", "", "", ""], correctAnswer: 0, marks: 1 },
   ]);
 
+  useEffect(() => {
+    if (testId && employerProfile?.id) fetchTest();
+    else setLoadingTest(false);
+  }, [testId, employerProfile?.id]);
+
+  const fetchTest = async () => {
+    if (!testId) return;
+    try {
+      const { data, error } = await supabase
+        .from("skill_tests")
+        .select("*")
+        .eq("id", testId)
+        .eq("employer_id", employerProfile?.id)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) {
+        toast({ title: "Test not found", description: "You can only edit your own tests.", variant: "destructive" });
+        navigate("/employer/tests");
+        return;
+      }
+
+      setTestData({
+        title: data.title || "",
+        description: data.description || "",
+        position: data.position || "",
+        location: data.location || "",
+        durationMinutes: data.duration_minutes || 60,
+        passingScore: data.passing_score || 40,
+      });
+
+      const raw = (data.questions as any[] || []);
+      if (raw.length > 0) {
+        setQuestions(
+          raw.map((q: any) => ({
+            id: crypto.randomUUID(),
+            question: q.question || "",
+            options: Array.isArray(q.options) ? [...q.options] : ["", "", "", ""],
+            correctAnswer: typeof q.correctAnswer === "number" ? q.correctAnswer : 0,
+            marks: q.marks ?? 1,
+          }))
+        );
+      }
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Error", description: "Failed to load test", variant: "destructive" });
+      navigate("/employer/tests");
+    } finally {
+      setLoadingTest(false);
+    }
+  };
+
   const addQuestion = () => {
-    setQuestions([
-      ...questions,
-      {
-        id: crypto.randomUUID(),
-        question: "",
-        options: ["", "", "", ""],
-        correctAnswer: 0,
-        marks: 1,
-      },
+    setQuestions((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), question: "", options: ["", "", "", ""], correctAnswer: 0, marks: 1 },
     ]);
   };
 
   const removeQuestion = (id: string) => {
-    if (questions.length > 1) {
-      setQuestions(questions.filter(q => q.id !== id));
-    }
+    if (questions.length > 1) setQuestions((prev) => prev.filter((q) => q.id !== id));
   };
 
   const updateQuestion = (id: string, field: keyof Question, value: unknown) => {
-    setQuestions(questions.map(q => 
-      q.id === id ? { ...q, [field]: value } : q
-    ));
+    setQuestions((prev) => prev.map((q) => (q.id === id ? { ...q, [field]: value } : q)));
   };
 
   const updateOption = (questionId: string, optionIndex: number, value: string) => {
-    setQuestions(questions.map(q => {
-      if (q.id === questionId) {
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id !== questionId) return q;
         const newOptions = [...q.options];
         newOptions[optionIndex] = value;
         return { ...q, options: newOptions };
-      }
-      return q;
-    }));
+      })
+    );
   };
 
   const handleSubmit = async (status: "draft" | "published") => {
     if (!testData.title || !testData.position) {
-      toast({
-        title: "Missing Required Fields",
-        description: "Please fill in the title and position.",
-        variant: "destructive",
-      });
+      toast({ title: "Missing required fields", description: "Fill in title and position.", variant: "destructive" });
       return;
     }
-
-    const validQuestions = questions.filter(q => q.question && q.options.every(o => o));
+    const validQuestions = questions.filter((q) => q.question && q.options.every((o) => o));
     if (validQuestions.length === 0) {
-      toast({
-        title: "No Valid Questions",
-        description: "Please add at least one complete question.",
-        variant: "destructive",
-      });
+      toast({ title: "No valid questions", description: "Add at least one complete question.", variant: "destructive" });
       return;
     }
-
-    if (!employerProfile?.id) {
-      toast({
-        title: "Error",
-        description: "Employer profile not found. Please try again.",
-        variant: "destructive",
-      });
-      return;
-    }
+    if (!testId || !employerProfile?.id) return;
 
     setLoading(true);
-
     try {
       const questionsPayload = validQuestions.map(({ id: _id, ...q }) => ({
         question: q.question,
@@ -133,92 +146,64 @@ const CreateTest = () => {
         correctAnswer: q.correctAnswer,
         marks: q.marks ?? 1,
       }));
-      const { data: insertedTests, error } = await supabase
+
+      const { error } = await supabase
         .from("skill_tests")
-        .insert({
-          employer_id: employerProfile.id,
+        .update({
           title: testData.title,
           description: testData.description,
           position: testData.position,
           location: testData.location,
           duration_minutes: testData.durationMinutes,
           passing_score: testData.passingScore,
-          test_fee: 50,
-          status: status,
+          status,
           questions: questionsPayload,
         })
-        .select()
-        .limit(1);
+        .eq("id", testId)
+        .eq("employer_id", employerProfile.id);
 
       if (error) throw error;
 
-      const createdTest = insertedTests?.[0];
-
-      // Notify all employees about newly published tests
-      if (createdTest && status === "published") {
-        const { data: employees } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("user_type", "employee");
-
-        if (employees && employees.length > 0) {
-          const notifications = employees.map((emp) => ({
-            user_id: emp.id,
-            title: "New Skill Test Available",
-            message: `${employerProfile.organizationName} has published a new test: "${testData.title}".`,
-            type: "skill_test",
-            reference_id: createdTest.id,
-            reference_type: "skill_test",
-          }));
-          await supabase.from("notifications").insert(notifications);
-        }
-      }
-
       toast({
-        title: status === "published" ? "Test Published!" : "Test Saved",
-        description: status === "published" 
-          ? "Your test is now visible to candidates." 
-          : "Your test has been saved as draft.",
+        title: status === "published" ? "Test updated and published" : "Test saved",
+        description: status === "published" ? "Candidates can take this test." : "Saved as draft.",
       });
-
       navigate("/employer/tests");
-    } catch (error) {
-      console.error("Error creating test:", error);
-      toast({
-        title: "Error",
-        description: "Failed to create test. Please try again.",
-        variant: "destructive",
-      });
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: "Error", description: e.message || "Failed to update test", variant: "destructive" });
     } finally {
       setLoading(false);
     }
   };
 
+  if (loadingTest) {
+    return (
+      <div className="min-h-screen bg-muted/30">
+        <Header />
+        <div className="pt-24 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-muted/30">
       <Header />
-      
       <main className="pt-24 pb-12">
         <div className="container mx-auto px-4 max-w-4xl">
-          <Button 
-            variant="ghost" 
-            onClick={() => navigate(-1)} 
-            className="mb-6"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
+          <Button variant="ghost" asChild className="mb-6">
+            <Link to="/employer/tests">
+              <ArrowLeft className="w-4 h-4 mr-2" /> Back
+            </Link>
           </Button>
 
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <h1 className="font-display text-3xl font-bold">Create Skill Test</h1>
-              <p className="text-muted-foreground">
-                Create automated proctored tests to evaluate candidates
-              </p>
-            </div>
+          <div className="mb-8">
+            <h1 className="font-display text-3xl font-bold">Edit Skill Test</h1>
+            <p className="text-muted-foreground">Update test details and questions</p>
           </div>
 
-          {/* Test Details */}
           <Card className="mb-8">
             <CardHeader>
               <CardTitle>Test Details</CardTitle>
@@ -232,7 +217,7 @@ const CreateTest = () => {
                     id="title"
                     placeholder="e.g., Cashier Skills Assessment"
                     value={testData.title}
-                    onChange={e => setTestData(prev => ({ ...prev, title: e.target.value }))}
+                    onChange={(e) => setTestData((prev) => ({ ...prev, title: e.target.value }))}
                   />
                 </div>
                 <div className="space-y-2">
@@ -241,7 +226,7 @@ const CreateTest = () => {
                     id="position"
                     placeholder="e.g., Retail Cashier"
                     value={testData.position}
-                    onChange={e => setTestData(prev => ({ ...prev, position: e.target.value }))}
+                    onChange={(e) => setTestData((prev) => ({ ...prev, position: e.target.value }))}
                   />
                 </div>
               </div>
@@ -252,7 +237,7 @@ const CreateTest = () => {
                   id="description"
                   placeholder="Describe what this test evaluates..."
                   value={testData.description}
-                  onChange={e => setTestData(prev => ({ ...prev, description: e.target.value }))}
+                  onChange={(e) => setTestData((prev) => ({ ...prev, description: e.target.value }))}
                   rows={3}
                 />
               </div>
@@ -264,7 +249,7 @@ const CreateTest = () => {
                     id="location"
                     placeholder="e.g., Bangalore"
                     value={testData.location}
-                    onChange={e => setTestData(prev => ({ ...prev, location: e.target.value }))}
+                    onChange={(e) => setTestData((prev) => ({ ...prev, location: e.target.value }))}
                   />
                 </div>
                 <div className="space-y-2">
@@ -273,7 +258,7 @@ const CreateTest = () => {
                     id="duration"
                     type="number"
                     value={testData.durationMinutes}
-                    onChange={e => setTestData(prev => ({ ...prev, durationMinutes: parseInt(e.target.value) || 60 }))}
+                    onChange={(e) => setTestData((prev) => ({ ...prev, durationMinutes: parseInt(e.target.value) || 60 }))}
                   />
                 </div>
                 <div className="space-y-2">
@@ -282,31 +267,22 @@ const CreateTest = () => {
                     id="passing"
                     type="number"
                     value={testData.passingScore}
-                    onChange={e => setTestData(prev => ({ ...prev, passingScore: parseInt(e.target.value) || 40 }))}
+                    onChange={(e) => setTestData((prev) => ({ ...prev, passingScore: parseInt(e.target.value) || 40 }))}
                   />
                 </div>
-              </div>
-
-              <div className="p-4 bg-accent/10 rounded-lg">
-                <p className="text-sm text-muted-foreground">
-                  <strong>Fee Structure:</strong> Employees pay ₹50 to take this test. 
-                  You will be charged ₹30 for each employee who completes the test.
-                </p>
               </div>
             </CardContent>
           </Card>
 
-          {/* Questions */}
           <Card className="mb-8">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>Questions</CardTitle>
-                  <CardDescription>Add multiple choice questions</CardDescription>
+                  <CardDescription>Edit multiple choice questions</CardDescription>
                 </div>
                 <Button onClick={addQuestion} variant="outline" size="sm">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Question
+                  <Plus className="w-4 h-4 mr-2" /> Add Question
                 </Button>
               </div>
             </CardHeader>
@@ -334,7 +310,7 @@ const CreateTest = () => {
                     <Textarea
                       placeholder="Enter your question..."
                       value={question.question}
-                      onChange={e => updateQuestion(question.id, "question", e.target.value)}
+                      onChange={(e) => updateQuestion(question.id, "question", e.target.value)}
                       rows={2}
                     />
                   </div>
@@ -352,7 +328,7 @@ const CreateTest = () => {
                         <Input
                           placeholder={`Option ${oIndex + 1}`}
                           value={option}
-                          onChange={e => updateOption(question.id, oIndex, e.target.value)}
+                          onChange={(e) => updateOption(question.id, oIndex, e.target.value)}
                         />
                       </div>
                     ))}
@@ -364,44 +340,28 @@ const CreateTest = () => {
                       <Input
                         type="number"
                         value={question.marks}
-                        onChange={e => updateQuestion(question.id, "marks", parseInt(e.target.value) || 1)}
+                        onChange={(e) => updateQuestion(question.id, "marks", parseInt(e.target.value) || 1)}
                         className="w-20"
                         min={1}
                       />
                     </div>
-                    <p className="text-xs text-muted-foreground mt-6">
-                      Select the correct answer by clicking the radio button
-                    </p>
                   </div>
                 </div>
               ))}
             </CardContent>
           </Card>
 
-          {/* Actions */}
           <div className="flex items-center justify-between">
-            <Button variant="outline" onClick={() => navigate(-1)}>
-              Cancel
+            <Button variant="outline" asChild>
+              <Link to="/employer/tests">Cancel</Link>
             </Button>
             <div className="flex items-center gap-3">
-              <Button 
-                variant="outline" 
-                onClick={() => handleSubmit("draft")}
-                disabled={loading}
-              >
-                <Save className="w-4 h-4 mr-2" />
-                Save as Draft
+              <Button variant="outline" onClick={() => handleSubmit("draft")} disabled={loading}>
+                <Save className="w-4 h-4 mr-2" /> Save as Draft
               </Button>
-              <Button 
-                onClick={() => handleSubmit("published")}
-                disabled={loading}
-              >
-                {loading ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <Eye className="w-4 h-4 mr-2" />
-                )}
-                Publish Test
+              <Button onClick={() => handleSubmit("published")} disabled={loading}>
+                {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Eye className="w-4 h-4 mr-2" />}
+                Update & Publish
               </Button>
             </div>
           </div>
@@ -411,4 +371,4 @@ const CreateTest = () => {
   );
 };
 
-export default CreateTest;
+export default EditTest;

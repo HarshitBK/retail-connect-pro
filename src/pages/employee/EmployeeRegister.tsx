@@ -194,6 +194,7 @@ const EmployeeRegister = () => {
       if (formData.skills.length === 0) newErrors.skills = "Select at least one skill";
       if (formData.retailCategories.length === 0) newErrors.retailCategories = "Select at least one retail category";
       if (formData.preferredWorkCities.length === 0) newErrors.preferredWorkCities = "Select at least one preferred work city";
+      if (!formData.resume) newErrors.resume = "Resume/CV is required (PDF or Word)";
     }
 
     if (step === "documents") {
@@ -282,6 +283,23 @@ const EmployeeRegister = () => {
           })
           .eq("id", user.id);
 
+        let resumeUrl: string | null = null;
+        if (formData.resume) {
+          const ext = formData.resume.name.split(".").pop() || "pdf";
+          const path = `${user.id}/resume_${Date.now()}.${ext}`;
+          const { error: uploadError } = await supabase.storage
+            .from("documents")
+            .upload(path, formData.resume, { upsert: true });
+          if (uploadError) {
+            console.error("Resume upload error:", uploadError);
+            toast({ title: "Resume upload failed", description: uploadError.message, variant: "destructive" });
+            setLoading(false);
+            return;
+          }
+          const { data: urlData } = supabase.storage.from("documents").getPublicUrl(path);
+          resumeUrl = urlData.publicUrl;
+        }
+
         // Create employee profile immediately (auto-confirm is enabled)
         const { error: empError } = await supabase
           .from("employee_profiles")
@@ -308,6 +326,7 @@ const EmployeeRegister = () => {
             bank_name: formData.bankName,
             bank_account_number: formData.bankAccountNumber,
             bank_ifsc: formData.bankIfsc,
+            resume_url: resumeUrl,
             employment_status: "available",
             profile_completion_percent: calculateProfileCompletion(),
           }]);
@@ -376,32 +395,21 @@ const EmployeeRegister = () => {
 
   const handleReferralReward = async (newUserId: string, referralCode: string) => {
     try {
+      const REFERRAL_BONUS_POINTS = 10;
       const { data: referrer } = await supabase
         .from("profiles")
         .select("id")
-        .eq("referral_code", referralCode)
+        .eq("referral_code", referralCode.trim().toUpperCase())
         .maybeSingle();
 
-      if (referrer) {
-        await supabase.from("referral_rewards").insert({
-          referrer_user_id: referrer.id,
-          referred_user_id: newUserId,
-          points_awarded: 15,
-        });
+      if (!referrer) return;
 
-        const { data: rewards } = await supabase
-          .from("reward_points")
-          .select("id, points")
-          .eq("user_id", referrer.id)
-          .maybeSingle();
-
-        if (rewards) {
-          await supabase
-            .from("reward_points")
-            .update({ points: (rewards.points || 0) + 15 })
-            .eq("id", rewards.id);
-        }
-      }
+      await supabase.from("referral_rewards").insert({
+        referrer_user_id: referrer.id,
+        referred_user_id: newUserId,
+        points_awarded: REFERRAL_BONUS_POINTS,
+      });
+      // DB trigger credits referrer's reward_points and sends them a notification
     } catch (err) {
       console.error("Referral error:", err);
     }
@@ -754,14 +762,16 @@ const EmployeeRegister = () => {
                     <p className="text-sm text-destructive">{errors.preferredWorkCities}</p>
                   )}
 
-                  {/* Resume Upload */}
+                  {/* Resume Upload - Required */}
                   <DocumentUpload
-                    label="Upload Resume/CV"
+                    label="Upload Resume/CV *"
                     accept=".pdf,.doc,.docx"
                     value={formData.resume}
                     onChange={(file) => handleInputChange("resume", file)}
-                    helpText="PDF or Word document (Max 5MB)"
+                    helpText="PDF or Word document (Max 5MB). Required for registration."
+                    required
                   />
+                  {errors.resume && <p className="text-sm text-destructive">{errors.resume}</p>}
                 </div>
               )}
 
