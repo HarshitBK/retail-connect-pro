@@ -3,9 +3,18 @@ import { Button } from "@/components/ui/button";
 import { Briefcase, Menu, X } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, profile, signOut } = useAuth();
@@ -15,7 +24,9 @@ const Header = () => {
 
   const path = location.pathname;
   const inEmployeeApp =
-    path.startsWith("/employee") && !path.startsWith("/employee/register");
+    (path.startsWith("/employee") && !path.startsWith("/employee/register")) ||
+    path.startsWith("/tests") ||
+    path.startsWith("/certifications");
   const inEmployerApp =
     path.startsWith("/employer") && !path.startsWith("/employer/register");
 
@@ -26,9 +37,14 @@ const Header = () => {
     userType === "employer" ? "/employer/dashboard" :
     "/";
 
-  const handleSignOut = async () => {
-    await signOut();
+  const handleSignOutClick = () => {
+    setSignOutDialogOpen(true);
     setIsMenuOpen(false);
+  };
+
+  const handleSignOutConfirm = async () => {
+    await signOut();
+    setSignOutDialogOpen(false);
     navigate("/");
   };
 
@@ -78,7 +94,7 @@ const Header = () => {
               </Button>
               <Button
                 variant="outline"
-                onClick={handleSignOut}
+                onClick={handleSignOutClick}
               >
                 Sign Out
               </Button>
@@ -144,7 +160,7 @@ const Header = () => {
                 <Button
                   variant="outline"
                   className="justify-start mx-4"
-                  onClick={handleSignOut}
+                  onClick={handleSignOutClick}
                 >
                   Sign Out
                 </Button>
@@ -153,6 +169,25 @@ const Header = () => {
           </div>
         )}
       </div>
+
+      <Dialog open={signOutDialogOpen} onOpenChange={setSignOutDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Sign out</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to sign out?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSignOutDialogOpen(false)}>
+              No
+            </Button>
+            <Button onClick={handleSignOutConfirm}>
+              Yes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 };

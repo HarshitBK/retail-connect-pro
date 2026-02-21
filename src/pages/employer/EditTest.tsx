@@ -18,6 +18,8 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
+import { aiTestApi } from "@/lib/aiTestApi";
 
 interface Question {
   id: string;
@@ -25,7 +27,23 @@ interface Question {
   options: string[];
   correctAnswer: number;
   marks: number;
+  selected: boolean;
 }
+
+type GeneratedMcq = {
+  id: string;
+  question: string;
+  options: string[];
+  correctAnswer: number;
+};
+
+type StoredQuestion = {
+  id?: string;
+  question?: string;
+  options?: string[];
+  correctAnswer?: number;
+  marks?: number;
+};
 
 const EditTest = () => {
   const { testId } = useParams<{ testId: string }>();
@@ -34,6 +52,10 @@ const EditTest = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [loadingTest, setLoadingTest] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [generatorFile, setGeneratorFile] = useState<File | null>(null);
+  const [questionsToShow, setQuestionsToShow] = useState<number>(20);
+  const [existingSourceFilePath, setExistingSourceFilePath] = useState<string | null>(null);
 
   const [testData, setTestData] = useState({
     title: "",
@@ -45,8 +67,72 @@ const EditTest = () => {
   });
 
   const [questions, setQuestions] = useState<Question[]>([
-    { id: crypto.randomUUID(), question: "", options: ["", "", "", ""], correctAnswer: 0, marks: 1 },
+    { id: crypto.randomUUID(), question: "", options: ["", "", "", ""], correctAnswer: 0, marks: 1, selected: true },
   ]);
+
+  const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  };
+
+  const generateWithAi = async () => {
+    if (!generatorFile) {
+      toast({ title: "Upload required", description: "Please choose a PDF or PPTX.", variant: "destructive" });
+      return;
+    }
+    if (!testData.title || !testData.position) {
+      toast({
+        title: "Missing Required Fields",
+        description: "Please fill in the test title and position (role) first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setGenerating(true);
+    try {
+      const buf = await generatorFile.arrayBuffer();
+      const data = await aiTestApi.generateMcqs({
+        testName: testData.title,
+        description: testData.description,
+        role: testData.position,
+        fileName: generatorFile.name,
+        mimeType: generatorFile.type,
+        fileBase64: arrayBufferToBase64(buf),
+        count: 50,
+      });
+      const generated: GeneratedMcq[] = Array.isArray(data?.questions) ? data.questions : [];
+      if (generated.length === 0) throw new Error("AI returned no questions.");
+
+      setQuestions(
+        generated.map((q) => ({
+          id: typeof q.id === "string" && q.id ? q.id : crypto.randomUUID(),
+          question: typeof q.question === "string" ? q.question : String(q.question ?? ""),
+          options: Array.isArray(q.options) ? q.options.map((o) => String(o ?? "")) : ["", "", "", ""],
+          correctAnswer: typeof q.correctAnswer === "number" ? q.correctAnswer : 0,
+          marks: 1,
+          selected: true,
+        }))
+      );
+
+      toast({
+        title: "Generated!",
+        description: `AI created ${generated.length} questions. Review, edit, and select the ones you want.`,
+      });
+    } catch (e: unknown) {
+      console.error(e);
+      const message = e instanceof Error ? e.message : "Please try again.";
+      toast({ title: "Generation failed", description: message, variant: "destructive" });
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   useEffect(() => {
     if (testId && employerProfile?.id) fetchTest();
@@ -69,27 +155,50 @@ const EditTest = () => {
         navigate("/employer/tests");
         return;
       }
+      const testRow = data as Database["public"]["Tables"]["skill_tests"]["Row"];
 
       setTestData({
-        title: data.title || "",
-        description: data.description || "",
-        position: data.position || "",
-        location: data.location || "",
-        durationMinutes: data.duration_minutes || 60,
-        passingScore: data.passing_score || 40,
+        title: testRow.title || "",
+        description: testRow.description || "",
+        position: testRow.position || "",
+        location: testRow.location || "",
+        durationMinutes: testRow.duration_minutes || 60,
+        passingScore: testRow.passing_score || 40,
       });
-
-      const raw = (data.questions as any[] || []);
-      if (raw.length > 0) {
-        setQuestions(
-          raw.map((q: any) => ({
-            id: crypto.randomUUID(),
-            question: q.question || "",
-            options: Array.isArray(q.options) ? [...q.options] : ["", "", "", ""],
-            correctAnswer: typeof q.correctAnswer === "number" ? q.correctAnswer : 0,
-            marks: q.marks ?? 1,
-          }))
+      const snapshot = await aiTestApi.getSnapshot(testId).catch(() => null);
+      if (snapshot && Array.isArray(snapshot.questionBank) && snapshot.questionBank.length > 0) {
+        setQuestionsToShow(
+          typeof snapshot.questionsToShow === "number" ? snapshot.questionsToShow : 20
         );
+        const approvedSet = new Set(
+          (snapshot.approvedQuestionIds || []).map((x) => String(x)).filter(Boolean)
+        );
+        const raw = snapshot.questionBank as StoredQuestion[];
+        setQuestions(
+          raw.map((q) => ({
+            id: typeof q?.id === "string" && q.id ? q.id : crypto.randomUUID(),
+            question: typeof q?.question === "string" ? q.question : "",
+            options: Array.isArray(q?.options) ? q.options.map((o) => String(o ?? "")) : ["", "", "", ""],
+            correctAnswer: typeof q?.correctAnswer === "number" ? q.correctAnswer : 0,
+            marks: typeof q?.marks === "number" ? q.marks : 1,
+            selected: approvedSet.size ? approvedSet.has(String(q?.id)) : true,
+          })),
+        );
+      } else {
+        setQuestionsToShow(20);
+        const raw = (Array.isArray(testRow.questions) ? testRow.questions : []) as unknown[];
+        if (raw.length > 0) {
+          setQuestions(
+            (raw as StoredQuestion[]).map((q) => ({
+              id: typeof q?.id === "string" && q.id ? q.id : crypto.randomUUID(),
+              question: typeof q?.question === "string" ? q.question : "",
+              options: Array.isArray(q?.options) ? q.options.map((o) => String(o ?? "")) : ["", "", "", ""],
+              correctAnswer: typeof q?.correctAnswer === "number" ? q.correctAnswer : 0,
+              marks: typeof q?.marks === "number" ? q.marks : 1,
+              selected: true,
+            })),
+          );
+        }
       }
     } catch (e) {
       console.error(e);
@@ -103,7 +212,7 @@ const EditTest = () => {
   const addQuestion = () => {
     setQuestions((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), question: "", options: ["", "", "", ""], correctAnswer: 0, marks: 1 },
+      { id: crypto.randomUUID(), question: "", options: ["", "", "", ""], correctAnswer: 0, marks: 1, selected: true },
     ]);
   };
 
@@ -136,16 +245,35 @@ const EditTest = () => {
       toast({ title: "No valid questions", description: "Add at least one complete question.", variant: "destructive" });
       return;
     }
+    const selectedValid = validQuestions.filter((q) => q.selected);
+    if (selectedValid.length === 0) {
+      toast({
+        title: "No Questions Selected",
+        description: "Please select at least one question to include in the test.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!testId || !employerProfile?.id) return;
 
     setLoading(true);
     try {
-      const questionsPayload = validQuestions.map(({ id: _id, ...q }) => ({
+      const questionBankPayload = validQuestions.map(({ selected: _selected, ...q }) => ({
+        id: q.id,
         question: q.question,
         options: q.options,
         correctAnswer: q.correctAnswer,
         marks: q.marks ?? 1,
       }));
+
+      const approvedIds = selectedValid.map((q) => q.id);
+      const approvedQuestionsPayload = selectedValid
+        .map(({ id: _id, selected: _selected, ...q }) => ({
+          question: q.question,
+          options: q.options,
+          correctAnswer: q.correctAnswer,
+          marks: q.marks ?? 1,
+        }));
 
       const { error } = await supabase
         .from("skill_tests")
@@ -157,21 +285,29 @@ const EditTest = () => {
           duration_minutes: testData.durationMinutes,
           passing_score: testData.passingScore,
           status,
-          questions: questionsPayload,
+          questions: approvedQuestionsPayload,
         })
         .eq("id", testId)
         .eq("employer_id", employerProfile.id);
 
       if (error) throw error;
 
+      await aiTestApi.saveSnapshot(testId, {
+        employerId: employerProfile.id,
+        questionBank: questionBankPayload,
+        approvedQuestionIds: approvedIds,
+        questionsToShow: Math.min(Math.max(1, questionsToShow || 1), approvedIds.length),
+      });
+
       toast({
         title: status === "published" ? "Test updated and published" : "Test saved",
         description: status === "published" ? "Candidates can take this test." : "Saved as draft.",
       });
       navigate("/employer/tests");
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      toast({ title: "Error", description: e.message || "Failed to update test", variant: "destructive" });
+      const message = e instanceof Error ? e.message : "Failed to update test";
+      toast({ title: "Error", description: message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -287,6 +423,54 @@ const EditTest = () => {
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="border rounded-lg p-4 bg-accent/10 space-y-4">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <p className="font-medium">AI Question Generator (PDF/PPTX)</p>
+                    <p className="text-sm text-muted-foreground">
+                      Upload a document and generate ~50 MCQs, then select and edit.
+                    </p>
+                  </div>
+                  <Button onClick={generateWithAi} disabled={generating} variant="secondary">
+                    {generating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                    Generate 50 MCQs
+                  </Button>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="ai-file">Upload PDF/PPTX</Label>
+                    <Input
+                      id="ai-file"
+                      type="file"
+                      accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                      onChange={(e) => setGeneratorFile(e.target.files?.[0] ?? null)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {generatorFile ? `Selected: ${generatorFile.name}` : "No file selected"}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="questionsToShow">Questions to show (random from selected)</Label>
+                    <Input
+                      id="questionsToShow"
+                      type="number"
+                      value={questionsToShow}
+                      onChange={(e) => setQuestionsToShow(parseInt(e.target.value) || 20)}
+                      min={1}
+                    />
+                  </div>
+                </div>
+
+                <div className="text-sm text-muted-foreground">
+                  Selected:{" "}
+                  <span className="font-medium text-foreground">
+                    {questions.filter((q) => q.selected).length}
+                  </span>{" "}
+                  / {questions.length}
+                </div>
+              </div>
+
               {questions.map((question, qIndex) => (
                 <div key={question.id} className="border rounded-lg p-4 space-y-4">
                   <div className="flex items-start justify-between gap-4">
@@ -294,6 +478,16 @@ const EditTest = () => {
                       <GripVertical className="w-4 h-4" />
                       <span className="font-medium">Q{qIndex + 1}</span>
                     </div>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={question.selected}
+                          onChange={(e) => updateQuestion(question.id, "selected", e.target.checked)}
+                          className="w-4 h-4"
+                        />
+                        Include
+                      </label>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -303,6 +497,7 @@ const EditTest = () => {
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>
+                    </div>
                   </div>
 
                   <div className="space-y-2">

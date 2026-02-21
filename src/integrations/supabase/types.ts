@@ -776,6 +776,7 @@ export type Database = {
           answers: Json | null
           completed_at: string | null
           created_at: string | null
+          delivered_questions: Json | null
           employee_id: string
           employer_charged: boolean | null
           fee_paid: number | null
@@ -789,6 +790,7 @@ export type Database = {
           answers?: Json | null
           completed_at?: string | null
           created_at?: string | null
+          delivered_questions?: Json | null
           employee_id: string
           employer_charged?: boolean | null
           fee_paid?: number | null
@@ -802,6 +804,7 @@ export type Database = {
           answers?: Json | null
           completed_at?: string | null
           created_at?: string | null
+          delivered_questions?: Json | null
           employee_id?: string
           employer_charged?: boolean | null
           fee_paid?: number | null
@@ -830,6 +833,7 @@ export type Database = {
       }
       skill_tests: {
         Row: {
+          approved_question_ids: Json | null
           created_at: string | null
           description: string | null
           duration_minutes: number | null
@@ -841,7 +845,11 @@ export type Database = {
           max_attempts: number | null
           passing_score: number | null
           position: string | null
+          question_bank: Json | null
           questions: Json | null
+          questions_to_show: number | null
+          shuffle_options: boolean | null
+          source_file_path: string | null
           starts_at: string | null
           status: Database["public"]["Enums"]["test_status"] | null
           test_fee: number | null
@@ -849,6 +857,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          approved_question_ids?: Json | null
           created_at?: string | null
           description?: string | null
           duration_minutes?: number | null
@@ -860,7 +869,11 @@ export type Database = {
           max_attempts?: number | null
           passing_score?: number | null
           position?: string | null
+          question_bank?: Json | null
           questions?: Json | null
+          questions_to_show?: number | null
+          shuffle_options?: boolean | null
+          source_file_path?: string | null
           starts_at?: string | null
           status?: Database["public"]["Enums"]["test_status"] | null
           test_fee?: number | null
@@ -868,6 +881,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          approved_question_ids?: Json | null
           created_at?: string | null
           description?: string | null
           duration_minutes?: number | null
@@ -879,7 +893,11 @@ export type Database = {
           max_attempts?: number | null
           passing_score?: number | null
           position?: string | null
+          question_bank?: Json | null
           questions?: Json | null
+          questions_to_show?: number | null
+          shuffle_options?: boolean | null
+          source_file_path?: string | null
           starts_at?: string | null
           status?: Database["public"]["Enums"]["test_status"] | null
           test_fee?: number | null

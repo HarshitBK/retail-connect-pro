@@ -15,6 +15,8 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import type { Database } from "@/integrations/supabase/types";
+import { aiTestApi } from "@/lib/aiTestApi";
 
 interface Question {
   id: number;
@@ -23,13 +25,21 @@ interface Question {
   correctAnswer: number;
 }
 
+type StoredQuestion = {
+  id?: string;
+  question?: string;
+  options?: string[];
+  correctAnswer?: number;
+  marks?: number;
+};
+
 const TakeTest = () => {
   const { testId } = useParams<{ testId: string }>();
   const navigate = useNavigate();
   const { user, employeeProfile } = useAuth();
   const { toast } = useToast();
 
-  const [test, setTest] = useState<any>(null);
+  const [test, setTest] = useState<Database["public"]["Tables"]["skill_tests"]["Row"] | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<Record<number, number>>({});
@@ -79,14 +89,6 @@ const TakeTest = () => {
         return;
       }
       setTest(data);
-      const rawQuestions = (data.questions as any[] || []);
-      const parsedQuestions = rawQuestions.map((q: any, i: number) => ({
-        id: i,
-        question: q.question || `Question ${i + 1}`,
-        options: Array.isArray(q.options) ? q.options : [],
-        correctAnswer: typeof q.correctAnswer === "number" ? q.correctAnswer : 0,
-      }));
-      setQuestions(parsedQuestions);
       setTimeLeft((data.duration_minutes || 60) * 60);
     } catch (error) {
       console.error("Error:", error);
@@ -98,21 +100,95 @@ const TakeTest = () => {
     }
   };
 
+  const shuffleArray = <T,>(arr: T[]) => {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
+  const pickRandom = <T,>(arr: T[], count: number) => {
+    if (count >= arr.length) return shuffleArray(arr);
+    return shuffleArray(arr).slice(0, count);
+  };
+
+  const buildDeliveredQuestions = (testRow: Database["public"]["Tables"]["skill_tests"]["Row"]): StoredQuestion[] => {
+    const bank = (Array.isArray(testRow.question_bank) ? testRow.question_bank : []) as unknown[];
+    const approved = (Array.isArray(testRow.approved_question_ids) ? testRow.approved_question_ids : []) as unknown[];
+
+    const approvedSet = new Set(approved.map((x) => String(x)).filter(Boolean));
+    const pool =
+      bank.length > 0
+        ? (bank as StoredQuestion[]).filter((q) => q?.id && approvedSet.has(String(q.id)))
+        : ((Array.isArray(testRow.questions) ? testRow.questions : []) as StoredQuestion[]);
+
+    const nToShowRaw = typeof testRow.questions_to_show === "number" ? testRow.questions_to_show : null;
+    const nToShow = nToShowRaw && nToShowRaw > 0 ? nToShowRaw : pool.length;
+
+    const chosen = pickRandom(pool, Math.min(nToShow, pool.length));
+    const shouldShuffleOptions = testRow.shuffle_options !== false;
+
+    return chosen.map((q) => {
+      const options = Array.isArray(q?.options) ? q.options.map((o) => String(o)) : [];
+      const correctAnswer = typeof q?.correctAnswer === "number" ? q.correctAnswer : 0;
+      if (!shouldShuffleOptions || options.length !== 4) return { ...q, options, correctAnswer };
+
+      const indices = shuffleArray([0, 1, 2, 3]);
+      const newOptions = indices.map((i) => options[i]);
+      const newCorrect = indices.findIndex((i) => i === correctAnswer);
+      return { ...q, options: newOptions, correctAnswer: newCorrect >= 0 ? newCorrect : 0 };
+    });
+  };
+
   const startTest = async () => {
     if (!employeeProfile || !testId) return;
     try {
-      const { data, error } = await supabase.from("skill_test_attempts").insert({
-        test_id: testId,
-        employee_id: employeeProfile.id,
-        status: "in_progress",
-        fee_paid: test?.test_fee || 0,
-      }).select().single();
+      const { data: testRow, error: testErr } = await supabase
+        .from("skill_tests")
+        .select("*")
+        .eq("id", testId)
+        .eq("status", "published")
+        .maybeSingle();
+      if (testErr) throw testErr;
+      if (!testRow) throw new Error("Test not available.");
+
+      const { data: attemptData, error } = await supabase
+        .from("skill_test_attempts")
+        .insert({
+          test_id: testId,
+          employee_id: employeeProfile.id,
+          status: "in_progress",
+          fee_paid: (testRow as Database["public"]["Tables"]["skill_tests"]["Row"])?.test_fee || 0,
+        })
+        .select()
+        .single();
 
       if (error) throw error;
-      setAttemptId(data.id);
+      const attemptIdVal = attemptData.id;
+      setAttemptId(attemptIdVal);
+
+      let delivered: StoredQuestion[];
+      try {
+        const result = await aiTestApi.startAttempt(testId, attemptIdVal);
+        delivered = Array.isArray(result.deliveredQuestions) ? result.deliveredQuestions : [];
+      } catch {
+        delivered = buildDeliveredQuestions(testRow as Database["public"]["Tables"]["skill_tests"]["Row"]);
+      }
+      if (delivered.length === 0) throw new Error("This test has no questions configured.");
+
+      const parsedQuestions = delivered.map((q: StoredQuestion, i: number) => ({
+        id: i,
+        question: String(q.question ?? `Question ${i + 1}`),
+        options: Array.isArray(q.options) ? q.options : [],
+        correctAnswer: typeof q.correctAnswer === "number" ? q.correctAnswer : 0,
+      }));
+      setQuestions(parsedQuestions);
       setTestStarted(true);
-    } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to start test.";
+      toast({ title: "Error", description: message, variant: "destructive" });
     }
   };
 
@@ -145,8 +221,9 @@ const TakeTest = () => {
         description: "Your answers have been submitted for evaluation.",
       });
       navigate("/employee/dashboard");
-    } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to submit test.";
+      toast({ title: "Error", description: message, variant: "destructive" });
     } finally {
       setSubmitting(false);
     }
@@ -167,7 +244,16 @@ const TakeTest = () => {
     );
   }
 
-  if (!test || questions.length === 0) {
+  const displayQuestionCount =
+    typeof test?.questions_to_show === "number" && test.questions_to_show > 0
+      ? test.questions_to_show
+      : Array.isArray(test?.approved_question_ids) && test.approved_question_ids.length > 0
+        ? test.approved_question_ids.length
+        : Array.isArray(test?.questions)
+          ? test.questions.length
+          : 0;
+
+  if (!test || displayQuestionCount === 0) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
@@ -201,7 +287,7 @@ const TakeTest = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-4 bg-muted rounded-lg text-center">
                     <p className="text-sm text-muted-foreground">Questions</p>
-                    <p className="text-2xl font-bold">{questions.length}</p>
+                    <p className="text-2xl font-bold">{displayQuestionCount}</p>
                   </div>
                   <div className="p-4 bg-muted rounded-lg text-center">
                     <p className="text-sm text-muted-foreground">Duration</p>

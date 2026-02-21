@@ -25,6 +25,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { aiTestApi } from "@/lib/aiTestApi";
 
 interface Question {
   id: string;
@@ -32,13 +33,24 @@ interface Question {
   options: string[];
   correctAnswer: number;
   marks: number;
+  selected: boolean;
 }
+
+type GeneratedMcq = {
+  id: string;
+  question: string;
+  options: string[];
+  correctAnswer: number;
+};
 
 const CreateTest = () => {
   const navigate = useNavigate();
   const { user, employerProfile } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generatorFile, setGeneratorFile] = useState<File | null>(null);
+  const [questionsToShow, setQuestionsToShow] = useState<number>(20);
   
   const [testData, setTestData] = useState({
     title: "",
@@ -56,8 +68,74 @@ const CreateTest = () => {
       options: ["", "", "", ""],
       correctAnswer: 0,
       marks: 1,
+      selected: true,
     },
   ]);
+
+  const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  };
+
+  const generateWithAi = async () => {
+    if (!generatorFile) {
+      toast({ title: "Upload required", description: "Please choose a PDF or PPTX.", variant: "destructive" });
+      return;
+    }
+    if (!testData.title || !testData.position) {
+      toast({
+        title: "Missing Required Fields",
+        description: "Please fill in the test title and position (role) first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setGenerating(true);
+    try {
+      const buf = await generatorFile.arrayBuffer();
+      const data = await aiTestApi.generateMcqs({
+        testName: testData.title,
+        description: testData.description,
+        role: testData.position,
+        fileName: generatorFile.name,
+        mimeType: generatorFile.type,
+        fileBase64: arrayBufferToBase64(buf),
+        count: 50,
+      });
+      const generated: GeneratedMcq[] = Array.isArray(data?.questions) ? data.questions : [];
+      if (generated.length === 0) throw new Error("AI returned no questions.");
+
+      setQuestions(
+        generated.map((q) => ({
+          id: typeof q.id === "string" && q.id ? q.id : crypto.randomUUID(),
+          question: typeof q.question === "string" ? q.question : String(q.question ?? ""),
+          options: Array.isArray(q.options) ? q.options.map((o) => String(o ?? "")) : ["", "", "", ""],
+          correctAnswer: typeof q.correctAnswer === "number" ? q.correctAnswer : 0,
+          marks: 1,
+          selected: true,
+        }))
+      );
+      setQuestionsToShow((prev) => (prev > 0 ? prev : 20));
+
+      toast({
+        title: "Generated!",
+        description: `AI created ${generated.length} questions. Review, edit, and select the ones you want.`,
+      });
+    } catch (e: unknown) {
+      console.error(e);
+      const message = e instanceof Error ? e.message : "Please try again.";
+      toast({ title: "Generation failed", description: message, variant: "destructive" });
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const addQuestion = () => {
     setQuestions([
@@ -68,6 +146,7 @@ const CreateTest = () => {
         options: ["", "", "", ""],
         correctAnswer: 0,
         marks: 1,
+        selected: true,
       },
     ]);
   };
@@ -114,6 +193,15 @@ const CreateTest = () => {
       });
       return;
     }
+    const selectedValid = validQuestions.filter((q) => q.selected);
+    if (selectedValid.length === 0) {
+      toast({
+        title: "No Questions Selected",
+        description: "Please select at least one question to include in the test.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     if (!employerProfile?.id) {
       toast({
@@ -127,7 +215,17 @@ const CreateTest = () => {
     setLoading(true);
 
     try {
-      const questionsPayload = validQuestions.map(({ id: _id, ...q }) => ({
+      const questionBankPayload = validQuestions.map(({ selected: _selected, ...q }) => ({
+        id: q.id,
+        question: q.question,
+        options: q.options,
+        correctAnswer: q.correctAnswer,
+        marks: q.marks ?? 1,
+      }));
+
+      const approvedIds = selectedValid.map((q) => q.id);
+      const approvedQuestionsPayload = selectedValid
+        .map(({ id: _id, selected: _selected, ...q }) => ({
         question: q.question,
         options: q.options,
         correctAnswer: q.correctAnswer,
@@ -145,7 +243,7 @@ const CreateTest = () => {
           passing_score: testData.passingScore,
           test_fee: 50,
           status: status,
-          questions: questionsPayload,
+          questions: approvedQuestionsPayload,
         })
         .select()
         .limit(1);
@@ -153,6 +251,15 @@ const CreateTest = () => {
       if (error) throw error;
 
       const createdTest = insertedTests?.[0];
+
+      if (createdTest) {
+        await aiTestApi.saveSnapshot(createdTest.id, {
+          employerId: employerProfile.id,
+          questionBank: questionBankPayload,
+          approvedQuestionIds: approvedIds,
+          questionsToShow: Math.min(Math.max(1, questionsToShow || 1), approvedIds.length),
+        });
+      }
 
       // Notify all employees about newly published tests
       if (createdTest && status === "published") {
@@ -311,6 +418,57 @@ const CreateTest = () => {
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="border rounded-lg p-4 bg-accent/10 space-y-4">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <p className="font-medium">AI Question Generator (PDF/PPTX)</p>
+                    <p className="text-sm text-muted-foreground">
+                      Upload a document and generate ~50 MCQs, then select and edit.
+                    </p>
+                  </div>
+                  <Button onClick={generateWithAi} disabled={generating} variant="secondary">
+                    {generating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                    Generate 50 MCQs
+                  </Button>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="ai-file">Upload PDF/PPTX</Label>
+                    <Input
+                      id="ai-file"
+                      type="file"
+                      accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                      onChange={(e) => setGeneratorFile(e.target.files?.[0] ?? null)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {generatorFile ? `Selected: ${generatorFile.name}` : "No file selected"}
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="questionsToShow">Questions to show (random from selected)</Label>
+                    <Input
+                      id="questionsToShow"
+                      type="number"
+                      value={questionsToShow}
+                      onChange={(e) => setQuestionsToShow(parseInt(e.target.value) || 20)}
+                      min={1}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Example: generate 50 → select 30 → show random 20 each attempt.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-sm text-muted-foreground">
+                  Selected:{" "}
+                  <span className="font-medium text-foreground">
+                    {questions.filter((q) => q.selected).length}
+                  </span>{" "}
+                  / {questions.length}
+                </div>
+              </div>
+
               {questions.map((question, qIndex) => (
                 <div key={question.id} className="border rounded-lg p-4 space-y-4">
                   <div className="flex items-start justify-between gap-4">
@@ -318,6 +476,16 @@ const CreateTest = () => {
                       <GripVertical className="w-4 h-4" />
                       <span className="font-medium">Q{qIndex + 1}</span>
                     </div>
+                    <div className="flex items-center gap-3">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={question.selected}
+                          onChange={(e) => updateQuestion(question.id, "selected", e.target.checked)}
+                          className="w-4 h-4"
+                        />
+                        Include
+                      </label>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -327,6 +495,7 @@ const CreateTest = () => {
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>
+                    </div>
                   </div>
 
                   <div className="space-y-2">
