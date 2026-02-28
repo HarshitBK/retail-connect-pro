@@ -78,7 +78,7 @@ const Footer = () => {
                 <Mail className="w-4 h-4 text-accent" />
                 support@retailhire.com
               </li>
-              <li className="flex items-center gap-2 text-primary-foreground/70 text-sm">
+              <li className="flex items-center gap-2 text-primary-foreground/70 text-sm">+91 99727 44655
                 <Phone className="w-4 h-4 text-accent" />
                 +91 98765 43210
               </li>
@@ -104,8 +104,8 @@ const Footer = () => {
           </div>
         </div>
       </div>
-    </footer>
-  );
+    </footer>);
+
 };
 
 export default Footer;
