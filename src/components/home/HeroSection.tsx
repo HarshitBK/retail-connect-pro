@@ -19,7 +19,7 @@ const HeroSection = () => {
 
       <div className="container mx-auto px-4 py-20 relative z-10">
         <div className="max-w-4xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-full text-primary text-sm font-medium mb-6 animate-slide-up">An Aadibodhi Intelligence Product
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-full text-primary text-sm font-medium mb-6 animate-slide-up">Trusted by 2,500+ retail companies
             <span className="w-2 h-2 bg-success rounded-full animate-pulse" />
             Trusted by 2,500+ retail companies
           </div>
