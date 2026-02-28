@@ -9,12 +9,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   User, Briefcase, Award, Bell, Wallet, Edit, Star,
   BookOpen, Trophy, Gift, Clock, CheckCircle2, MapPin,
-  Phone, Mail, Loader2, Share2, ExternalLink,
+  Phone, Mail, Loader2, Share2, ExternalLink, MessageSquare, Building2
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import SocialShareButtons from "@/components/shared/SocialShareButtons";
 import { RETAIL_CATEGORIES } from "@/lib/constants";
+import { ChatWidget } from "@/components/chat/ChatWidget";
 
 const EmployeeDashboard = () => {
   const navigate = useNavigate();
@@ -25,7 +26,9 @@ const EmployeeDashboard = () => {
   const [testCount, setTestCount] = useState(0);
   const [certCount, setCertCount] = useState(0);
   const [loadingData, setLoadingData] = useState(true);
-  const [activeTab, setActiveTab] = useState<"notifications" | "certifications" | "rewards">("notifications");
+  const [activeTab, setActiveTab] = useState<"notifications" | "certifications" | "rewards" | "jobs">("notifications");
+  const [jobs, setJobs] = useState<any[]>([]);
+  const [activeChat, setActiveChat] = useState<{ roomId: string; recipientName: string; warningMessage: string; } | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -48,12 +51,20 @@ const EmployeeDashboard = () => {
 
       // Fetch test attempts and cert enrollments count
       if (employeeId) {
-        const [testsRes, certsRes] = await Promise.all([
+        const [testsRes, certsRes, resRes, hiredRes] = await Promise.all([
           supabase.from("skill_test_attempts").select("id", { count: "exact" }).eq("employee_id", employeeId),
           supabase.from("course_enrollments").select("id", { count: "exact" }).eq("employee_id", employeeId).eq("status", "completed"),
+          supabase.from("candidate_reservations").select("*, employer_profiles(*)").eq("employee_id", employeeId).in("status", ["pending"]),
+          supabase.from("hired_candidates").select("*, employer_profiles(*)").eq("employee_id", employeeId).in("status", ["active"])
         ]);
         setTestCount(testsRes.count || 0);
         setCertCount(certsRes.count || 0);
+
+        const allJobs = [
+          ...(resRes.data || []).map(r => ({ ...r, type: 'reserved' })),
+          ...(hiredRes.data || []).map(h => ({ ...h, type: 'hired' }))
+        ];
+        setJobs(allJobs);
       }
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
@@ -229,10 +240,11 @@ const EmployeeDashboard = () => {
               </div>
 
               <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-4">
                   <TabsTrigger value="notifications">
                     <Bell className="w-4 h-4 mr-2" />Notifications {unreadCount > 0 && `(${unreadCount})`}
                   </TabsTrigger>
+                  <TabsTrigger value="jobs"><Briefcase className="w-4 h-4 mr-2" />My Jobs</TabsTrigger>
                   <TabsTrigger value="certifications"><Award className="w-4 h-4 mr-2" />Certifications</TabsTrigger>
                   <TabsTrigger value="rewards"><Gift className="w-4 h-4 mr-2" />Rewards</TabsTrigger>
                 </TabsList>
@@ -322,11 +334,69 @@ const EmployeeDashboard = () => {
                     </CardContent>
                   </Card>
                 </TabsContent>
+
+                <TabsContent value="jobs" className="mt-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">My Opportunities</CardTitle>
+                      <CardDescription>View and manage your reserved and active job opportunities</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        {jobs.length > 0 ? jobs.map(job => (
+                          <div key={job.id} className="flex flex-col md:flex-row md:items-center justify-between p-4 border border-border rounded-lg gap-4">
+                            <div className="flex items-start gap-3">
+                              <Building2 className="w-5 h-5 text-muted-foreground mt-0.5" />
+                              <div>
+                                <p className="font-medium text-foreground">{job.employer_profiles?.organization_name || "Employer"}</p>
+                                <div className="flex gap-2 items-center mt-1">
+                                  {job.type === 'reserved' ? (
+                                    <Badge className="bg-warning text-warning-foreground">Reserved</Badge>
+                                  ) : (
+                                    <Badge className="bg-success text-success-foreground">Hired</Badge>
+                                  )}
+                                  <span className="text-xs text-muted-foreground">
+                                    {new Date(job.created_at || job.hired_date).toLocaleDateString()}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <Button
+                              variant="secondary"
+                              onClick={() => setActiveChat({
+                                roomId: job.reservation_id || job.id,
+                                recipientName: job.employer_profiles?.organization_name || "Employer",
+                                warningMessage: job.type === 'reserved' ? "Chat is active for 5 days or until hiring decision." : "Chat will disappear if you are released."
+                              })}
+                            >
+                              <MessageSquare className="w-4 h-4 mr-2" />Chat
+                            </Button>
+                          </div>
+                        )) : (
+                          <p className="text-center text-muted-foreground py-8">No active opportunities yet</p>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
               </Tabs>
             </div>
           </div>
         </div>
       </main>
+
+      {/* Chat Widget */}
+      {activeChat && (
+        <ChatWidget
+          isOpen={!!activeChat}
+          onClose={() => setActiveChat(null)}
+          roomId={activeChat.roomId}
+          recipientName={activeChat.recipientName}
+          senderId={user?.id || ""}
+          senderName={employeeProfile?.fullName || "Employee"}
+          warningMessage={activeChat.warningMessage}
+        />
+      )}
     </div>
   );
 };

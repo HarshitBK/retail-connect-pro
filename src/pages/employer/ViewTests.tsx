@@ -4,20 +4,20 @@ import Header from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from "@/components/ui/table";
-import { 
-  ArrowLeft, 
-  Plus, 
-  Eye, 
-  Edit, 
-  Trash2, 
+import {
+  ArrowLeft,
+  Plus,
+  Eye,
+  Edit,
+  Trash2,
   Users,
   Clock,
   BarChart3,
@@ -115,12 +115,12 @@ const ViewTests = () => {
   return (
     <div className="min-h-screen bg-muted/30">
       <Header />
-      
+
       <main className="pt-24 pb-12">
         <div className="container mx-auto px-4">
-          <Button 
-            variant="ghost" 
-            asChild 
+          <Button
+            variant="ghost"
+            asChild
             className="mb-6"
           >
             <Link to="/employer/dashboard">

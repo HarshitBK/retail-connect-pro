@@ -10,7 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Clock, AlertCircle, CheckCircle2, ArrowRight, ArrowLeft,
-  Loader2, Timer, Flag
+  Loader2, Timer, Flag, Video, Mic, Maximize, LayoutDashboard, LogOut,
+  User, ClipboardCheck, Eye
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -51,6 +52,16 @@ const TakeTest = () => {
   const [showResultDialog, setShowResultDialog] = useState(false);
   const [result, setResult] = useState<{ score: number; total: number; passed: boolean } | null>(null);
 
+  // Anti-cheating states
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [violations, setViolations] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [checkingMedia, setCheckingMedia] = useState(false);
+  const [mediaGranted, setMediaGranted] = useState(false);
+  const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
+  const [visitedQuestions, setVisitedQuestions] = useState<Set<number>>(new Set([0]));
+
   useEffect(() => {
     fetchTest();
   }, [testId]);
@@ -71,6 +82,46 @@ const TakeTest = () => {
     return () => clearInterval(timer);
   }, [testStarted, timeLeft]);
 
+  // Tab Switching Detection
+  useEffect(() => {
+    if (!testStarted) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setViolations(prev => prev + 1);
+        toast({
+          title: "Cheating Warning!",
+          description: "Switching tabs/windows during the test is strictly prohibited. This incident will be reported.",
+          variant: "destructive"
+        });
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [testStarted, toast]);
+
+  // Fullscreen Detection
+  useEffect(() => {
+    if (!testStarted) return;
+
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, [testStarted]);
+
+  // Cleanup Media Stream
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [stream]);
+
   const fetchTest = async () => {
     if (!testId) return;
     try {
@@ -85,6 +136,18 @@ const TakeTest = () => {
       if (!data) {
         setTest(null);
         setQuestions([]);
+        setLoading(false);
+        return;
+      }
+      if (data.starts_at && new Date(data.starts_at) > new Date()) {
+        toast({ title: "Test Not Started", description: "This test is scheduled to start later." });
+        setTest(null);
+        setLoading(false);
+        return;
+      }
+      if (data.ends_at && new Date(data.ends_at) < new Date()) {
+        toast({ title: "Test Expired", description: "This test has already expired.", variant: "destructive" });
+        setTest(null);
         setLoading(false);
         return;
       }
@@ -142,8 +205,40 @@ const TakeTest = () => {
     });
   };
 
+  const requestFullscreen = async () => {
+    try {
+      const element = document.documentElement;
+      if (element.requestFullscreen) {
+        await element.requestFullscreen();
+      }
+    } catch (err) {
+      console.error("Fullscreen error:", err);
+    }
+  };
+
+  const initMedia = async () => {
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setStream(mediaStream);
+      setMediaError(null);
+      return true;
+    } catch (err) {
+      console.error("Media error:", err);
+      setMediaError("Camera and Microphone access is mandatory to take this test.");
+      return false;
+    }
+  };
+
+  const handleEnableMedia = async () => {
+    setCheckingMedia(true);
+    const ok = await initMedia();
+    setMediaGranted(ok);
+    setCheckingMedia(false);
+  };
+
   const startTest = async () => {
-    if (!employeeProfile || !testId) return;
+    if (!employeeProfile || !testId || !mediaGranted) return;
+
     try {
       const { data: testRow, error: testErr } = await supabase
         .from("skill_tests")
@@ -153,6 +248,13 @@ const TakeTest = () => {
         .maybeSingle();
       if (testErr) throw testErr;
       if (!testRow) throw new Error("Test not available.");
+
+      if (testRow.starts_at && new Date(testRow.starts_at) > new Date()) {
+        throw new Error("This test has not started yet.");
+      }
+      if (testRow.ends_at && new Date(testRow.ends_at) < new Date()) {
+        throw new Error("This test has expired.");
+      }
 
       const { data: attemptData, error } = await supabase
         .from("skill_test_attempts")
@@ -186,10 +288,32 @@ const TakeTest = () => {
       }));
       setQuestions(parsedQuestions);
       setTestStarted(true);
+      setVisitedQuestions(new Set([0]));
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Failed to start test.";
       toast({ title: "Error", description: message, variant: "destructive" });
     }
+  };
+
+  const handleNext = () => {
+    if (currentQuestion < questions.length - 1) {
+      const nextIdx = currentQuestion + 1;
+      setCurrentQuestion(nextIdx);
+      setVisitedQuestions(prev => new Set([...prev, nextIdx]));
+    }
+  };
+
+  const handlePrev = () => {
+    if (currentQuestion > 0) {
+      const prevIdx = currentQuestion - 1;
+      setCurrentQuestion(prevIdx);
+      setVisitedQuestions(prev => new Set([...prev, prevIdx]));
+    }
+  };
+
+  const jumpToQuestion = (idx: number) => {
+    setCurrentQuestion(idx);
+    setVisitedQuestions(prev => new Set([...prev, idx]));
   };
 
   const handleAnswer = (questionIdx: number, answerIdx: number) => {
@@ -203,31 +327,48 @@ const TakeTest = () => {
     try {
       let correct = 0;
       questions.forEach((q, i) => {
-        if (answers[i] === q.correctAnswer) correct++;
+        if (answers[i] === q.correctAnswer) {
+          correct++;
+        }
       });
 
       const score = Math.round((correct / questions.length) * 100);
       const passed = score >= (test?.passing_score || 40);
 
-      await supabase.from("skill_test_attempts").update({
+      const { error } = await supabase.from("skill_test_attempts").update({
         status: "completed",
         score,
         answers: answers,
         completed_at: new Date().toISOString(),
+        metadata: { violations }
       }).eq("id", attemptId);
+
+      if (error) throw error;
+
+      if (document.fullscreenElement) {
+        try { await document.exitFullscreen(); } catch (e) { console.error(e); }
+      }
+
       setTestStarted(false);
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        setStream(null);
+      }
+
       toast({
         title: "Test submitted",
-        description: "Your answers have been submitted for evaluation.",
+        description: `Score: ${score}%. Your answers have been submitted successfully.`,
       });
       navigate("/employee/dashboard");
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Failed to submit test.";
+    } catch (error: any) {
+      console.error("Submission Error:", error);
+      const message = error?.message || error?.details || "Failed to submit test.";
       toast({ title: "Error", description: message, variant: "destructive" });
     } finally {
       setSubmitting(false);
+      setShowConfirmSubmit(false);
     }
-  }, [attemptId, answers, questions, test, submitting]);
+  }, [attemptId, answers, questions, test, submitting, stream, violations, navigate, toast]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
@@ -259,7 +400,7 @@ const TakeTest = () => {
         <Header />
         <main className="pt-24 pb-12">
           <div className="container mx-auto px-4 max-w-2xl text-center">
-            <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+            <AlertCircle className="w-8 h-8 text-muted-foreground mx-auto mb-4" />
             <h2 className="text-xl font-semibold mb-2">Test Not Available</h2>
             <p className="text-muted-foreground mb-4">
               {!test ? "This test was not found or is no longer available. It may be closed or removed." : "This test doesn't have any questions yet."}
@@ -303,22 +444,29 @@ const TakeTest = () => {
                   </div>
                 </div>
 
-                <div className="p-4 bg-warning/10 rounded-lg border border-warning/20">
+                <div className="p-4 bg-blue-500/10 rounded-lg border border-blue-500/20">
                   <div className="flex items-start gap-2">
-                    <AlertCircle className="w-5 h-5 text-warning mt-0.5" />
+                    <Video className="w-5 h-5 text-blue-500 mt-0.5" />
                     <div className="text-sm">
-                      <p className="font-medium">Important Instructions</p>
+                      <p className="font-medium">Anti-Cheating Policy</p>
                       <ul className="text-muted-foreground mt-1 space-y-1">
-                        <li>• Once started, the timer cannot be paused</li>
-                        <li>• Answer all questions before the time runs out</li>
-                        <li>• Your score will be calculated automatically</li>
-                        <li>• You need {test.passing_score}% to pass</li>
+                        <li>• Fullscreen mode is mandatory</li>
+                        <li>• Camera and Microphone will be monitored</li>
+                        <li>• Tab switching will be logged as a violation</li>
+                        <li>• Multiple violations may lead to disqualification</li>
                       </ul>
                     </div>
                   </div>
                 </div>
 
-                <Button variant="hero" className="w-full" size="lg" onClick={startTest}>
+                {mediaError && (
+                  <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4" />
+                    {mediaError}
+                  </div>
+                )}
+
+                <Button variant="default" className="w-full" size="lg" onClick={startTest}>
                   Start Test Now
                 </Button>
               </CardContent>
@@ -332,109 +480,329 @@ const TakeTest = () => {
   const currentQ = questions[currentQuestion];
   const answeredCount = Object.keys(answers).length;
   const progressPercent = (answeredCount / questions.length) * 100;
+  const notSeenCount = questions.length - visitedQuestions.size;
+  const notAttemptedCount = questions.length - answeredCount;
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header />
-      <main className="pt-24 pb-12">
-        <div className="container mx-auto px-4 max-w-3xl">
-          {/* Timer Bar */}
-          <div className="sticky top-16 z-10 bg-background py-3 border-b border-border mb-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <Badge variant="outline">{test.title}</Badge>
-                <span className="text-sm text-muted-foreground">
-                  Q {currentQuestion + 1}/{questions.length}
-                </span>
-              </div>
-              <div className={`flex items-center gap-2 font-mono text-lg font-bold ${timeLeft < 300 ? "text-destructive" : "text-foreground"}`}>
-                <Timer className="w-5 h-5" />
+    <div className="min-h-screen bg-muted/10 flex flex-col font-sans selection:bg-primary/20">
+      {/* Test-Active Header: Simplified to prevent accidental navigation */}
+      {!testStarted ? <Header /> : (
+        <header className="fixed top-0 left-0 right-0 z-[60] h-10 bg-white border-b border-primary/10 shadow-sm flex items-center px-6 justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <ClipboardCheck className="w-5 h-5 text-primary" />
+              <span className="font-bold text-lg tracking-tight text-foreground">{test.title}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 bg-primary/5 px-4 py-1.5 rounded-lg border border-primary/10">
+              <Clock className="w-4 h-4 text-primary" />
+              <span className={`font-mono text-xl font-bold ${timeLeft < 300 ? "text-destructive blink" : "text-primary"}`}>
                 {formatTime(timeLeft)}
+              </span>
+            </div>
+            <div className="w-px h-6 bg-muted" />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowConfirmSubmit(true)}
+              className="text-xs font-bold text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
+              QUIT
+            </Button>
+          </div>
+        </header>
+      )}
+
+      <main className={`${testStarted ? "pt-14" : "pt-24"} flex-1 flex flex-col overflow-hidden`}>
+        {/* Anti-cheating Fullscreen Overlay */}
+        {testStarted && !isFullscreen && (
+          <div className="fixed inset-0 z-[100] bg-slate-900 bg-opacity-95 flex flex-col items-center justify-center text-center p-6 pointer-events-auto">
+            <div className="p-4 bg-red-500/10 rounded-full mb-6 border border-red-500/20">
+              <Maximize className="w-10 h-10 text-red-500" />
+            </div>
+            <h2 className="text-2xl font-semibold text-white mb-3">FULLSCREEN MODE REQUIRED</h2>
+            <p className="text-slate-400 max-w-sm mb-8 text-sm leading-relaxed">
+              To maintain integrity, this assessment must be completed in fullscreen. Your progress is paused. Please restore fullscreen to continue.
+            </p>
+            <Button size="lg" onClick={requestFullscreen} className="h-12 px-8 rounded bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-xl cursor-pointer pointer-events-auto relative z-[110]">
+              RESTORE FULLSCREEN NOW
+            </Button>
+          </div>
+        )}
+
+        {testStarted && isFullscreen ? (
+          <div className="flex-1 flex overflow-hidden">
+            {/* Left Area: Main Question Content */}
+            <div className="flex-1 flex flex-col bg-white relative">
+              <div className="flex-1 overflow-y-auto p-4 lg:p-6">
+                <div className="w-full max-w-4xl mx-auto">
+                  <div className="mb-4 pb-2 border-b flex justify-between items-center bg-blue-50/50 px-4 py-2 rounded">
+                    <span className="text-sm font-semibold text-blue-700">
+                      Question {currentQuestion + 1}
+                    </span>
+                    <span className="text-xs text-muted-foreground font-medium">
+                      Marks: 1
+                    </span>
+                  </div>
+                  <h2 className="text-[15px] font-medium text-slate-800 mb-6 px-2 leading-relaxed">
+                    {currentQ.question}
+                  </h2>
+                  <RadioGroup
+                    value={answers[currentQuestion]?.toString()}
+                    onValueChange={v => handleAnswer(currentQuestion, parseInt(v))}
+                    className="grid grid-cols-1 gap-2 pl-2"
+                  >
+                    {currentQ.options.map((option, idx) => {
+                      const isSelected = answers[currentQuestion] === idx;
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() => handleAnswer(currentQuestion, idx)}
+                          className={`flex items-start p-3 w-fit pr-8 rounded border transition-colors cursor-pointer ${isSelected ? "bg-blue-50 border-blue-200" : "border-transparent hover:bg-slate-50"}`}
+                        >
+                          <div className={`w-6 h-6 rounded-full border flex items-center justify-center text-xs shrink-0 mt-0.5 transition-colors ${isSelected ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-300"}`}>
+                            {String.fromCharCode(65 + idx)}
+                          </div>
+                          <Label className="pl-3 text-[14px] text-slate-700 cursor-pointer leading-snug pt-1" onClick={(e) => e.preventDefault()}>
+                            {option}
+                          </Label>
+                          <RadioGroupItem value={idx.toString()} id={`q${currentQuestion}-opt${idx}`} className="sr-only" />
+                        </div>
+                      );
+                    })}
+                  </RadioGroup>
+                </div>
+              </div>
+
+              {/* Bottom Nav Actions */}
+              <div className="bg-slate-50 border-t py-3 px-6 flex flex-wrap items-center justify-between gap-4 shrink-0">
+                <Button variant="outline" onClick={() => handleAnswer(currentQuestion, -1)} className="text-sm font-medium h-9 px-6 bg-white border-slate-300 text-slate-700 hover:bg-slate-100 rounded-sm">
+                  Clear Response
+                </Button>
+                <div className="flex items-center gap-3">
+                  <Button variant="secondary" onClick={handlePrev} disabled={currentQuestion === 0} className="w-28 text-sm font-semibold h-9 rounded-sm bg-slate-200 text-slate-800 hover:bg-slate-300">
+                    Previous
+                  </Button>
+                  <Button onClick={handleNext} disabled={currentQuestion === questions.length - 1} className="w-28 text-sm font-semibold h-9 shadow-sm rounded-sm bg-blue-600 hover:bg-blue-700 text-white">
+                    Save & Next
+                  </Button>
+                </div>
               </div>
             </div>
-            <Progress value={progressPercent} className="h-1 mt-2" />
-          </div>
 
-          {/* Question Card */}
-          <Card className="shadow-lg mb-6">
-            <CardHeader>
-              <CardTitle className="text-lg">
-                Question {currentQuestion + 1}
-              </CardTitle>
-              <CardDescription className="text-base text-foreground font-medium mt-2">
-                {currentQ.question}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <RadioGroup
-                value={answers[currentQuestion]?.toString()}
-                onValueChange={v => handleAnswer(currentQuestion, parseInt(v))}
-                className="space-y-3"
-              >
-                {currentQ.options.map((option, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex items-center space-x-3 p-4 rounded-lg border cursor-pointer transition-all ${
-                      answers[currentQuestion] === idx
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-primary/50"
-                    }`}
-                    onClick={() => handleAnswer(currentQuestion, idx)}
-                  >
-                    <RadioGroupItem value={idx.toString()} id={`q${currentQuestion}-opt${idx}`} />
-                    <Label htmlFor={`q${currentQuestion}-opt${idx}`} className="cursor-pointer flex-1">
-                      {option}
-                    </Label>
+            {/* Right Sidebar: Proctoring & Palette */}
+            <div className="w-80 border-l bg-muted/5 flex flex-col z-10 shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)]">
+              {/* Camera Video Fixed at Top */}
+              <div className="p-4 border-b bg-black relative shrink-0">
+                <div className="flex items-center justify-between absolute top-6 left-6 right-6 z-10 pointer-events-none">
+                  <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur px-2 py-1 rounded shadow-sm text-[10px] text-white font-bold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> REC
                   </div>
-                ))}
-              </RadioGroup>
-            </CardContent>
-          </Card>
+                  {violations > 0 && (
+                    <div className="flex items-center gap-1 bg-destructive/90 px-2 py-1 rounded shadow-sm text-[10px] text-white font-bold">
+                      {violations} Warnings
+                    </div>
+                  )}
+                </div>
+                <video
+                  autoPlay
+                  muted
+                  ref={video => { if (video && stream) video.srcObject = stream; }}
+                  className="w-full aspect-video object-cover rounded-md mirror scale-x-[-1] border border-white/20 shadow-md"
+                />
+              </div>
 
-          {/* Navigation */}
-          <div className="flex items-center justify-between">
-            <Button
-              variant="outline"
-              onClick={() => setCurrentQuestion(prev => Math.max(0, prev - 1))}
-              disabled={currentQuestion === 0}
-            >
-              <ArrowLeft className="w-4 h-4 mr-2" />Previous
-            </Button>
+              {/* Box Title */}
+              <div className="bg-blue-600 text-white text-[13px] font-bold px-4 py-2 flex items-center justify-between">
+                <span>Section: {test.title}</span>
+                <span className="opacity-80 font-normal">Q. {currentQuestion + 1}/{questions.length}</span>
+              </div>
 
-            <div className="flex gap-2">
-              {/* Question dots */}
-              {questions.map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => setCurrentQuestion(i)}
-                  className={`w-8 h-8 rounded-full text-xs font-medium transition-all ${
-                    i === currentQuestion
-                      ? "bg-primary text-primary-foreground"
-                      : answers[i] !== undefined
-                      ? "bg-success/20 text-success border border-success/30"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {i + 1}
-                </button>
-              ))}
+              {/* Navigation Grid */}
+              <div className="flex-1 p-4 overflow-y-auto bg-slate-50 border-b border-l border-r mx-4 mt-4 rounded-t shadow-inner">
+                <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                  {questions.map((_, i) => {
+                    let statusClass = "bg-white text-slate-600 border-slate-300"; // Not seen
+                    if (answers[i] !== undefined && answers[i] !== -1) {
+                      statusClass = "bg-green-500 text-white border-green-600"; // Answered
+                    } else if (visitedQuestions.has(i)) {
+                      statusClass = "bg-red-500 text-white border-red-600"; // Not answered (visited)
+                    }
+
+                    if (i === currentQuestion) {
+                      statusClass = "bg-blue-600 text-white border-blue-700";
+                    }
+
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => jumpToQuestion(i)}
+                        className={`w-[36px] h-[36px] mx-auto rounded-md text-[13px] font-medium border transition-colors flex items-center justify-center shadow-sm hover:opacity-80 ${statusClass}`}
+                      >
+                        {i + 1}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Legend & Submit */}
+              <div className="p-4 bg-white border-l border-r border-b mx-4 rounded-b mb-4">
+                <p className="text-xs font-bold text-slate-700 mb-3">Legend :</p>
+                <div className="grid grid-cols-2 gap-y-2 text-[11px] font-medium text-slate-600">
+                  <div className="flex items-center gap-2"><div className="w-4 h-4 rounded bg-green-500 border border-green-600 shadow-sm" /> Answered</div>
+                  <div className="flex items-center gap-2"><div className="w-4 h-4 rounded bg-red-500 border border-red-600 shadow-sm" /> Not Answered</div>
+                  <div className="flex items-center gap-2"><div className="w-4 h-4 rounded bg-white border border-slate-300 shadow-sm" /> Not Visited</div>
+                  <div className="flex items-center gap-2"><div className="w-4 h-4 rounded bg-blue-600 border border-blue-700 shadow-sm" /> Current</div>
+                </div>
+                <div className="mt-5 pt-4 border-t border-slate-100">
+                  <Button onClick={() => setShowConfirmSubmit(true)} className="w-full h-10 bg-[#4caec4] hover:bg-[#3d8c9e] text-white text-sm font-semibold shadow-sm rounded-sm">
+                    Submit Exam
+                  </Button>
+                </div>
+              </div>
             </div>
-
-            {currentQuestion === questions.length - 1 ? (
-              <Button variant="hero" onClick={handleSubmit} disabled={submitting}>
-                {submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Flag className="w-4 h-4 mr-2" />}
-                Submit Test
-              </Button>
-            ) : (
-              <Button onClick={() => setCurrentQuestion(prev => Math.min(questions.length - 1, prev + 1))}>
-                Next<ArrowRight className="w-4 h-4 ml-2" />
-              </Button>
-            )}
           </div>
-        </div>
-      </main>
+        ) : (
+          <div className="container mx-auto px-4 max-w-2xl mt-8 mb-4">
+            <Card className="shadow-2xl border-none overflow-hidden rounded-lg bg-white">
+              <div className="h-3 bg-primary w-full" />
+              <CardHeader className="text-center pt-10 pb-6 space-y-4">
+                <div className="w-20 h-10 rounded-lg bg-primary/10 flex items-center justify-center mx-auto mb-2 border-4 border-white shadow-xl">
+                  <Timer className="w-8 h-8 text-primary" />
+                </div>
+                <h1 className="font-display font-semibold text-xl text-foreground tracking-tight px-6">{test.title}</h1>
+                <p className="text-muted-foreground text-base px-8 leading-relaxed font-medium">{test.description}</p>
+              </CardHeader>
+              <CardContent className="space-y-8 px-8 pb-10">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-primary/5 rounded-lg flex flex-col items-center border border-primary/10 shadow-sm">
+                    <Flag className="w-6 h-6 text-primary mb-2" />
+                    <span className="text-[10px] font-semibold text-primary/60 uppercase tracking-widest">Questions</span>
+                    <span className="text-xl font-semibold text-primary">{displayQuestionCount}</span>
+                  </div>
+                  <div className="p-4 bg-muted/30 rounded-lg flex flex-col items-center border border-transparent">
+                    <Clock className="w-6 h-6 text-primary mb-2" />
+                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Duration</span>
+                    <span className="text-xl font-semibold">{test.duration_minutes}m</span>
+                  </div>
+                </div>
 
-      {/* Result Dialog intentionally removed for employees (results visible only to employers) */}
+                <div className="space-y-6">
+                  <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-muted-foreground text-center">Mandatory Compliance Checklist</h3>
+                  <div className="grid grid-cols-1 gap-4">
+                    {[
+                      { icon: <Video />, title: "Live Proctoring", desc: "Camera & mic will record throughout the session." },
+                      { icon: <LayoutDashboard />, title: "Locked Environment", desc: "Tab switching & browser resizing are prohibited." },
+                      { icon: <CheckCircle2 />, title: "Benchmarking", desc: "Score 50% or above to earn the certification." }
+                    ].map((step, idx) => (
+                      <div key={idx} className="flex gap-5 p-5 bg-muted/20 rounded-lg border border-transparent transition-all hover:bg-white hover:border-primary/10 hover:shadow-xl group">
+                        <div className="w-8 h-8 rounded-md bg-white shadow-md flex items-center justify-center text-primary transition-transform group-hover:rotate-6">
+                          {step.icon}
+                        </div>
+                        <div className="flex flex-col justify-center">
+                          <h4 className="font-semibold text-sm uppercase tracking-tight">{step.title}</h4>
+                          <p className="text-xs text-muted-foreground font-bold">{step.desc}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {mediaError && (
+                  <div className="p-5 bg-destructive/10 border-2 border-destructive/20 rounded-lg text-destructive text-sm font-semibold flex items-center gap-4 animate-shake">
+                    <AlertCircle className="w-7 h-7 shrink-0" />
+                    <p>{mediaError}</p>
+                  </div>
+                )}
+
+                {!mediaGranted ? (
+                  <Button variant="outline" className="w-full h-10 text-[13px] font-semibold rounded-md hover:bg-primary/5 transition-all text-muted-foreground uppercase tracking-widest" onClick={handleEnableMedia} disabled={checkingMedia}>
+                    {checkingMedia ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Video className="w-5 h-5 mr-3" />}
+                    1. Enable Camera & Mic to Proceed
+                  </Button>
+                ) : (
+                  <Button variant="default" className="w-full h-10 text-lg font-semibold rounded-md shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all" onClick={startTest}>
+                    2. START ASSESSMENT NOW
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Submit Progress Dialog */}
+        <Dialog open={showConfirmSubmit} onOpenChange={setShowConfirmSubmit}>
+          <DialogContent className="max-w-xl rounded-lg border-none p-0 overflow-hidden shadow-2xl bg-white">
+            <div className="bg-primary p-6 text-primary-foreground relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl" />
+              <DialogHeader className="relative z-10">
+                <DialogTitle className="text-2xl font-semibold tracking-tight">Final Submission</DialogTitle>
+                <DialogDescription className="text-primary-foreground/80 font-bold text-lg pt-4 leading-relaxed">
+                  Excellent work! Review your completion metrics before final commitment.
+                </DialogDescription>
+              </DialogHeader>
+            </div>
+            <div className="p-6 space-y-12">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="text-center p-6 bg-muted/30 rounded-lg border-2 border-transparent">
+                  <p className="text-xl font-semibold mb-1">{questions.length}</p>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase opacity-60">Total Items</p>
+                </div>
+                <div className="text-center p-6 bg-success/10 text-success rounded-lg border-2 border-success/10 shadow-inner">
+                  <p className="text-xl font-semibold mb-1">{answeredCount}</p>
+                  <p className="text-[10px] font-semibold uppercase opacity-60">Attempted</p>
+                </div>
+                <div className="text-center p-6 bg-destructive/5 text-destructive rounded-lg border-2 border-destructive/5">
+                  <p className="text-xl font-semibold mb-1">{notAttemptedCount}</p>
+                  <p className="text-[10px] font-semibold uppercase opacity-60">Unanswered</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-6 bg-primary/5 rounded-lg border border-primary/10 flex flex-col items-center">
+                  <Eye className="w-6 h-6 text-primary mb-2 opacity-40" />
+                  <p className="text-xl font-semibold text-primary mb-1">{notSeenCount}</p>
+                  <p className="text-[10px] font-semibold text-primary/60 uppercase">Not Even Seen</p>
+                </div>
+                <div className="p-6 bg-warning/5 rounded-lg border border-warning/10 flex flex-col items-center">
+                  <Flag className="w-6 h-6 text-warning mb-2 opacity-40" />
+                  <p className="text-xl font-semibold text-warning mb-1">{violations}</p>
+                  <p className="text-[10px] font-semibold text-warning/60 uppercase">Violations</p>
+                </div>
+              </div>
+
+              {notAttemptedCount > 0 && (
+                <div className="p-6 bg-orange-500/5 rounded-lg border-2 border-orange-500/10 flex gap-4">
+                  <div className="w-8 h-8 rounded-md bg-orange-500 flex items-center justify-center shrink-0 shadow-lg shadow-orange-500/20">
+                    <AlertCircle className="w-6 h-6 text-white" />
+                  </div>
+                  <div className="flex flex-col justify-center">
+                    <p className="font-semibold text-orange-950 text-sm italic">UNFINISHED TASKS DETECTED</p>
+                    <p className="text-xs text-orange-900/60 font-bold">You have {notAttemptedCount} unanswered questions. Scores are calculated only on committed answers.</p>
+                  </div>
+                </div>
+              )}
+
+              <DialogFooter className="flex-col sm:flex-col gap-4">
+                <Button className="w-full h-10 text-2xl font-semibold rounded-lg shadow-2xl hover:scale-[1.02] transition-all" onClick={handleSubmit} disabled={submitting}>
+                  {submitting ? (
+                    <>
+                      <Loader2 className="w-6 h-6 mr-3 animate-spin" />
+                      SUBMITTING...
+                    </>
+                  ) : "SUBMIT TEST"}
+                </Button>
+                <Button variant="ghost" className="w-full h-10 font-semibold text-muted-foreground hover:text-foreground rounded-md" onClick={() => setShowConfirmSubmit(false)}>
+                  RE-REVIEW ATTEMPT
+                </Button>
+              </DialogFooter>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </main>
     </div>
   );
 };

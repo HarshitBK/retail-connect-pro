@@ -48,18 +48,18 @@ function coerceQuestions(raw, fallbackCount) {
 
 export async function generateMcqs({ testName, description, role, sourceText, count = 50 }) {
   const prompt = makePrompt({ testName, description, role, sourceText, count });
-  const model = process.env.OPENAI_MODEL || "gpt-5-nano";
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-  const response = await openai.responses.create({
+  const response = await openai.chat.completions.create({
     model,
-    input: [
-      { role: "system", content: "Return strict JSON only." },
+    messages: [
+      { role: "system", content: "You are an expert assessment designer. Return strict JSON only." },
       { role: "user", content: prompt },
     ],
-    text: { format: { type: "json_object" } },
+    response_format: { type: "json_object" },
   });
 
-  const text = response.output_text;
+  const text = response.choices[0].message.content;
   if (typeof text !== "string" || !text.trim()) throw new Error("OpenAI returned empty content.");
   const parsed = JSON.parse(text);
   return coerceQuestions(parsed, count);

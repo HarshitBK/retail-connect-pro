@@ -13,7 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 const Login = () => {
   const navigate = useNavigate();
-  const { signIn } = useAuth();
+  const { signIn, signOut } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<"employee" | "employer">("employee");
   const [showPassword, setShowPassword] = useState(false);
@@ -55,7 +55,7 @@ const Login = () => {
       if (!isEmail) {
         const { data: profileData, error: lookupError } = await supabase
           .from("profiles")
-          .select("email")
+          .select("email, user_type")
           .eq("username", formData.identifier)
           .maybeSingle();
 
@@ -63,6 +63,16 @@ const Login = () => {
           toast({
             title: "Login Failed",
             description: "Username not found. Please check and try again.",
+            variant: "destructive",
+          });
+          setLoading(false);
+          return;
+        }
+
+        if (profileData.user_type !== activeTab) {
+          toast({
+            title: "Login Failed",
+            description: "Invalid email/username or password",
             variant: "destructive",
           });
           setLoading(false);
@@ -84,20 +94,42 @@ const Login = () => {
         return;
       }
 
-      toast({
-        title: "Welcome back!",
-        description: "You have successfully logged in.",
-      });
-
-      // Redirect based on user type from profile
-      const { data: profile } = await supabase
+      // Verify user type matches the active tab after successful login
+      const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("user_type")
         .eq("email", email)
         .maybeSingle();
 
-      const redirectPath = profile?.user_type === "employer" 
-        ? "/employer/dashboard" 
+      if (profileError || !profile) {
+        await signOut();
+        toast({
+          title: "Login Failed",
+          description: "Could not retrieve user profile.",
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
+
+      if (profile.user_type !== activeTab) {
+        await signOut();
+        toast({
+          title: "Login Failed",
+          description: "Invalid email/username or password",
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
+
+      toast({
+        title: "Welcome back!",
+        description: "You have successfully logged in.",
+      });
+
+      const redirectPath = profile.user_type === "employer"
+        ? "/employer/dashboard"
         : "/employee/dashboard";
       navigate(redirectPath);
     } catch (err: any) {

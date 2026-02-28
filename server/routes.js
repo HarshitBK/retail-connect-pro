@@ -4,6 +4,7 @@ import { generateMcqs } from "./openai-mcq.js";
 
 const SNAPSHOTS = "test_snapshots";
 const DELIVERED = "attempt_delivered";
+const CHATS = "chat_messages";
 
 function shuffleArray(arr) {
   const a = [...arr];
@@ -152,6 +153,44 @@ export function registerRoutes(app) {
         { upsert: true }
       );
       res.json({ deliveredQuestions: delivered });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: e instanceof Error ? e.message : "Unknown error" });
+    }
+  });
+
+  // GET /api/chat/:roomId
+  app.get("/api/chat/:roomId", async (req, res) => {
+    try {
+      await getDb();
+      const col = getCollection(CHATS);
+      const messages = await col.find({ roomId: req.params.roomId }).sort({ createdAt: 1 }).toArray();
+      res.json(messages);
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: e instanceof Error ? e.message : "Unknown error" });
+    }
+  });
+
+  // POST /api/chat/send
+  app.post("/api/chat/send", async (req, res) => {
+    try {
+      await getDb();
+      const col = getCollection(CHATS);
+      const { roomId, senderId, senderName, content, attachmentUrl } = req.body || {};
+      if (!roomId || !senderId || !content) {
+        return res.status(400).json({ error: "roomId, senderId, and content are required." });
+      }
+      const message = {
+        roomId,
+        senderId,
+        senderName,
+        content,
+        attachmentUrl: attachmentUrl || null,
+        createdAt: new Date(),
+      };
+      await col.insertOne(message);
+      res.json(message);
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: e instanceof Error ? e.message : "Unknown error" });

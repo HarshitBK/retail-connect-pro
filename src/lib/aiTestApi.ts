@@ -1,7 +1,7 @@
 /**
- * Local AI test API (Node + MongoDB). Set VITE_AI_API_URL in .env (e.g. http://localhost:3001).
+ * Local AI test API (Node + MongoDB). Set VITE_AI_API_URL in .env.
  */
-const BASE = import.meta.env.VITE_AI_API_URL || "http://localhost:3001";
+const BASE = import.meta.env.VITE_AI_API_URL || "http://127.0.0.1:3001";
 
 export const aiTestApi = {
   async generateMcqs(payload: {

@@ -20,6 +20,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import SocialShareButtons from "@/components/shared/SocialShareButtons";
 import { RETAIL_CATEGORIES } from "@/lib/constants";
+import { MessageSquare } from "lucide-react";
+import { ChatWidget } from "@/components/chat/ChatWidget";
 
 const EmployerDashboard = () => {
   const navigate = useNavigate();
@@ -38,6 +40,8 @@ const EmployerDashboard = () => {
   const [showBlacklistDialog, setShowBlacklistDialog] = useState(false);
   const [blacklistTarget, setBlacklistTarget] = useState<any>(null);
   const [blacklistReason, setBlacklistReason] = useState("");
+
+  const [activeChat, setActiveChat] = useState<{ roomId: string; recipientName: string; warningMessage: string; } | null>(null);
 
   useEffect(() => {
     if (user && employerProfile) {
@@ -70,7 +74,7 @@ const EmployerDashboard = () => {
       // For reserved candidates, fetch their profile contact info
       const reserved = resRes.data || [];
       const enrichedReserved = await enrichWithContactInfo(reserved);
-      
+
       const hired = hiredRes.data || [];
       const enrichedHired = await enrichWithContactInfo(hired);
 
@@ -109,7 +113,7 @@ const EmployerDashboard = () => {
     const userIds = items
       .map(i => i.employee_profiles?.user_id)
       .filter(Boolean);
-    
+
     if (userIds.length === 0) return items;
 
     const { data: profiles } = await supabase
@@ -501,6 +505,17 @@ const EmployerDashboard = () => {
                                     <Button variant="outline" size="sm" onClick={() => handleHireDecision(reservation, false)}>
                                       <UserX className="w-4 h-4 mr-1" />Not Hired
                                     </Button>
+                                    <Button
+                                      variant="secondary"
+                                      size="sm"
+                                      onClick={() => setActiveChat({
+                                        roomId: reservation.id,
+                                        recipientName: emp?.full_name || "Candidate",
+                                        warningMessage: "Chat is active for 5 days or until hiring decision."
+                                      })}
+                                    >
+                                      <MessageSquare className="w-4 h-4 mr-1" />Chat
+                                    </Button>
                                     <p className="text-xs text-muted-foreground text-center">₹200 refund if not hired</p>
                                   </div>
                                 </div>
@@ -623,6 +638,19 @@ const EmployerDashboard = () => {
                                         <AlertTriangle className="w-4 h-4 mr-1" />Blacklist
                                       </Button>
                                     )}
+                                    {isActive && (
+                                      <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={() => setActiveChat({
+                                          roomId: hired.reservation_id,
+                                          recipientName: emp?.full_name || "Employee",
+                                          warningMessage: "Chat will disappear if employee is released."
+                                        })}
+                                      >
+                                        <MessageSquare className="w-4 h-4 mr-1" />Chat
+                                      </Button>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -696,6 +724,19 @@ const EmployerDashboard = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Chat Widget */}
+      {activeChat && (
+        <ChatWidget
+          isOpen={!!activeChat}
+          onClose={() => setActiveChat(null)}
+          roomId={activeChat.roomId}
+          recipientName={activeChat.recipientName}
+          senderId={user?.id || ""}
+          senderName={employerProfile?.organizationName || "Employer"}
+          warningMessage={activeChat.warningMessage}
+        />
+      )}
     </div>
   );
 };

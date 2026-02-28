@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { 
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -13,8 +13,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { 
-  ArrowLeft, 
+import {
+  ArrowLeft,
   Users,
   Trophy,
   Clock,
@@ -131,19 +131,19 @@ const TestResults = () => {
       const [{ data: pendingReservations }, { data: recentHires }] = await Promise.all([
         employeeIds.length > 0
           ? supabase
-              .from("candidate_reservations")
-              .select("employee_id, expires_at, status")
-              .in("employee_id", employeeIds)
-              .eq("status", "pending")
-              .gt("expires_at", nowIso)
+            .from("candidate_reservations")
+            .select("employee_id, expires_at, status")
+            .in("employee_id", employeeIds)
+            .eq("status", "pending")
+            .gt("expires_at", nowIso)
           : Promise.resolve({ data: [] as any[] } as any),
         employeeIds.length > 0
           ? supabase
-              .from("hired_candidates")
-              .select("employee_id, hired_date, status")
-              .in("employee_id", employeeIds)
-              .eq("status", "active")
-              .gt("hired_date", thirtyDaysAgoIso)
+            .from("hired_candidates")
+            .select("employee_id, hired_date, status")
+            .in("employee_id", employeeIds)
+            .eq("status", "active")
+            .gt("hired_date", thirtyDaysAgoIso)
           : Promise.resolve({ data: [] as any[] } as any),
       ]);
 
@@ -156,8 +156,8 @@ const TestResults = () => {
         const blockedReason: TestResult["blockedReason"] = blockedByHire.has(attempt.employee_id)
           ? "hired"
           : blockedByReservation.has(attempt.employee_id)
-          ? "reserved"
-          : null;
+            ? "reserved"
+            : null;
 
         return {
           id: attempt.id,
@@ -198,8 +198,8 @@ const TestResults = () => {
   };
 
   const toggleCandidateSelection = (id: string) => {
-    setSelectedCandidates(prev => 
-      prev.includes(id) 
+    setSelectedCandidates(prev =>
+      prev.includes(id)
         ? prev.filter(c => c !== id)
         : [...prev, id]
     );
@@ -337,12 +337,12 @@ const TestResults = () => {
   return (
     <div className="min-h-screen bg-muted/30">
       <Header />
-      
+
       <main className="pt-24 pb-12">
         <div className="container mx-auto px-4">
-          <Button 
-            variant="ghost" 
-            asChild 
+          <Button
+            variant="ghost"
+            asChild
             className="mb-6"
           >
             <Link to="/employer/tests">
@@ -478,15 +478,14 @@ const TestResults = () => {
                           c.employmentStatus === "available"
                             ? <Badge className="bg-success text-success-foreground">Available</Badge>
                             : c.employmentStatus === "reserved"
-                            ? <Badge className="bg-warning text-warning-foreground">Reserved</Badge>
-                            : <Badge className="bg-primary text-primary-foreground">Employed</Badge>;
+                              ? <Badge className="bg-warning text-warning-foreground">Reserved</Badge>
+                              : <Badge className="bg-primary text-primary-foreground">Employed</Badge>;
 
                         return (
                           <Card
                             key={result.id}
-                            className={`transition-all ${result.isBlocked ? "opacity-60" : "hover:border-primary/50"} ${
-                              isSelected ? "border-primary shadow-md" : ""
-                            }`}
+                            className={`transition-all ${result.isBlocked ? "opacity-60" : "hover:border-primary/50"} ${isSelected ? "border-primary shadow-md" : ""
+                              }`}
                           >
                             <CardContent className="pt-6">
                               <div className="flex items-start gap-4">
@@ -627,8 +626,8 @@ const TestResults = () => {
               </div>
             </div>
             <p className="text-sm text-muted-foreground mt-4">
-              Reserved candidates will be exclusive to you for 5 days. You'll be able to view their 
-              full contact details and can hire them during this period. A refund of ₹200 per 
+              Reserved candidates will be exclusive to you for 5 days. You'll be able to view their
+              full contact details and can hire them during this period. A refund of ₹200 per
               candidate applies if you don't hire them.
             </p>
           </div>
