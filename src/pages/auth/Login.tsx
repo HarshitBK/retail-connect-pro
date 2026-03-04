@@ -85,9 +85,12 @@ const Login = () => {
       const { error } = await signIn(email, formData.password);
 
       if (error) {
+        const isUnconfirmed = error.message?.toLowerCase().includes("email not confirmed");
         toast({
-          title: "Login Failed",
-          description: error.message,
+          title: isUnconfirmed ? "Email Not Verified" : "Login Failed",
+          description: isUnconfirmed
+            ? "Please check your inbox and click the verification link we sent you before logging in."
+            : error.message,
           variant: "destructive",
         });
         setLoading(false);
