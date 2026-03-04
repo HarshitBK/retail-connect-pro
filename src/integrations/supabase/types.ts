@@ -194,8 +194,8 @@ export type Database = {
           education_grade: string | null
           education_level: string | null
           employment_status:
-          | Database["public"]["Enums"]["employment_status"]
-          | null
+            | Database["public"]["Enums"]["employment_status"]
+            | null
           full_name: string
           gender: string | null
           id: string
@@ -235,8 +235,8 @@ export type Database = {
           education_grade?: string | null
           education_level?: string | null
           employment_status?:
-          | Database["public"]["Enums"]["employment_status"]
-          | null
+            | Database["public"]["Enums"]["employment_status"]
+            | null
           full_name: string
           gender?: string | null
           id?: string
@@ -276,8 +276,8 @@ export type Database = {
           education_grade?: string | null
           education_level?: string | null
           employment_status?:
-          | Database["public"]["Enums"]["employment_status"]
-          | null
+            | Database["public"]["Enums"]["employment_status"]
+            | null
           full_name?: string
           gender?: string | null
           id?: string
@@ -776,46 +776,43 @@ export type Database = {
           answers: Json | null
           completed_at: string | null
           created_at: string | null
-          delivered_questions: Json | null
           employee_id: string
           employer_charged: boolean | null
           fee_paid: number | null
           id: string
+          metadata: Json | null
           score: number | null
           started_at: string | null
           status: Database["public"]["Enums"]["attempt_status"] | null
           test_id: string
-          metadata: Json | null
         }
         Insert: {
           answers?: Json | null
           completed_at?: string | null
           created_at?: string | null
-          delivered_questions?: Json | null
           employee_id: string
           employer_charged?: boolean | null
           fee_paid?: number | null
           id?: string
+          metadata?: Json | null
           score?: number | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["attempt_status"] | null
           test_id: string
-          metadata?: Json | null
         }
         Update: {
           answers?: Json | null
           completed_at?: string | null
           created_at?: string | null
-          delivered_questions?: Json | null
           employee_id?: string
           employer_charged?: boolean | null
           fee_paid?: number | null
           id?: string
+          metadata?: Json | null
           score?: number | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["attempt_status"] | null
           test_id?: string
-          metadata?: Json | null
         }
         Relationships: [
           {
@@ -836,7 +833,6 @@ export type Database = {
       }
       skill_tests: {
         Row: {
-          approved_question_ids: Json | null
           created_at: string | null
           description: string | null
           duration_minutes: number | null
@@ -848,11 +844,7 @@ export type Database = {
           max_attempts: number | null
           passing_score: number | null
           position: string | null
-          question_bank: Json | null
           questions: Json | null
-          questions_to_show: number | null
-          shuffle_options: boolean | null
-          source_file_path: string | null
           starts_at: string | null
           status: Database["public"]["Enums"]["test_status"] | null
           test_fee: number | null
@@ -860,7 +852,6 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
-          approved_question_ids?: Json | null
           created_at?: string | null
           description?: string | null
           duration_minutes?: number | null
@@ -872,11 +863,7 @@ export type Database = {
           max_attempts?: number | null
           passing_score?: number | null
           position?: string | null
-          question_bank?: Json | null
           questions?: Json | null
-          questions_to_show?: number | null
-          shuffle_options?: boolean | null
-          source_file_path?: string | null
           starts_at?: string | null
           status?: Database["public"]["Enums"]["test_status"] | null
           test_fee?: number | null
@@ -884,7 +871,6 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
-          approved_question_ids?: Json | null
           created_at?: string | null
           description?: string | null
           duration_minutes?: number | null
@@ -896,11 +882,7 @@ export type Database = {
           max_attempts?: number | null
           passing_score?: number | null
           position?: string | null
-          question_bank?: Json | null
           questions?: Json | null
-          questions_to_show?: number | null
-          shuffle_options?: boolean | null
-          source_file_path?: string | null
           starts_at?: string | null
           status?: Database["public"]["Enums"]["test_status"] | null
           test_fee?: number | null
@@ -1037,116 +1019,116 @@ type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
 
 export type Tables<
   DefaultSchemaTableNameOrOptions extends
-  | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
-  | { schema: keyof DatabaseWithoutInternals },
+    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-  ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-    DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-  : never = never,
+    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
+    : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
   ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-    DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
       Row: infer R
     }
-  ? R
-  : never
+    ? R
+    : never
   : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
-    DefaultSchema["Views"])
-  ? (DefaultSchema["Tables"] &
-    DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
-      Row: infer R
-    }
-  ? R
-  : never
-  : never
+        DefaultSchema["Views"])
+    ? (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+        Row: infer R
+      }
+      ? R
+      : never
+    : never
 
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
-  | keyof DefaultSchema["Tables"]
-  | { schema: keyof DatabaseWithoutInternals },
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-  ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-  : never = never,
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
   ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-    Insert: infer I
-  }
-  ? I
-  : never
+      Insert: infer I
+    }
+    ? I
+    : never
   : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-  ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-    Insert: infer I
-  }
-  ? I
-  : never
-  : never
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Insert: infer I
+      }
+      ? I
+      : never
+    : never
 
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
-  | keyof DefaultSchema["Tables"]
-  | { schema: keyof DatabaseWithoutInternals },
+    | keyof DefaultSchema["Tables"]
+    | { schema: keyof DatabaseWithoutInternals },
   TableName extends DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-  ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-  : never = never,
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
+    : never = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
   ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-    Update: infer U
-  }
-  ? U
-  : never
+      Update: infer U
+    }
+    ? U
+    : never
   : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-  ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-    Update: infer U
-  }
-  ? U
-  : never
-  : never
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Update: infer U
+      }
+      ? U
+      : never
+    : never
 
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
-  | keyof DefaultSchema["Enums"]
-  | { schema: keyof DatabaseWithoutInternals },
+    | keyof DefaultSchema["Enums"]
+    | { schema: keyof DatabaseWithoutInternals },
   EnumName extends DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-  ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-  : never = never,
+    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
+    : never = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
   ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
   : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
-  ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
-  : never
+    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
+    : never
 
 export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
-  | keyof DefaultSchema["CompositeTypes"]
-  | { schema: keyof DatabaseWithoutInternals },
+    | keyof DefaultSchema["CompositeTypes"]
+    | { schema: keyof DatabaseWithoutInternals },
   CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
-  ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-  : never = never,
+    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
   ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
   : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
-  ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
-  : never
+    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never
 
 export const Constants = {
   public: {

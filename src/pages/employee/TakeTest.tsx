@@ -178,25 +178,14 @@ const TakeTest = () => {
   };
 
   const buildDeliveredQuestions = (testRow: Database["public"]["Tables"]["skill_tests"]["Row"]): StoredQuestion[] => {
-    const bank = (Array.isArray(testRow.question_bank) ? testRow.question_bank : []) as unknown[];
-    const approved = (Array.isArray(testRow.approved_question_ids) ? testRow.approved_question_ids : []) as unknown[];
+    const pool = (Array.isArray(testRow.questions) ? testRow.questions : []) as StoredQuestion[];
 
-    const approvedSet = new Set(approved.map((x) => String(x)).filter(Boolean));
-    const pool =
-      bank.length > 0
-        ? (bank as StoredQuestion[]).filter((q) => q?.id && approvedSet.has(String(q.id)))
-        : ((Array.isArray(testRow.questions) ? testRow.questions : []) as StoredQuestion[]);
-
-    const nToShowRaw = typeof testRow.questions_to_show === "number" ? testRow.questions_to_show : null;
-    const nToShow = nToShowRaw && nToShowRaw > 0 ? nToShowRaw : pool.length;
-
-    const chosen = pickRandom(pool, Math.min(nToShow, pool.length));
-    const shouldShuffleOptions = testRow.shuffle_options !== false;
+    const chosen = pickRandom(pool, pool.length);
 
     return chosen.map((q) => {
       const options = Array.isArray(q?.options) ? q.options.map((o) => String(o)) : [];
       const correctAnswer = typeof q?.correctAnswer === "number" ? q.correctAnswer : 0;
-      if (!shouldShuffleOptions || options.length !== 4) return { ...q, options, correctAnswer };
+      if (options.length !== 4) return { ...q, options, correctAnswer };
 
       const indices = shuffleArray([0, 1, 2, 3]);
       const newOptions = indices.map((i) => options[i]);
@@ -385,14 +374,7 @@ const TakeTest = () => {
     );
   }
 
-  const displayQuestionCount =
-    typeof test?.questions_to_show === "number" && test.questions_to_show > 0
-      ? test.questions_to_show
-      : Array.isArray(test?.approved_question_ids) && test.approved_question_ids.length > 0
-        ? test.approved_question_ids.length
-        : Array.isArray(test?.questions)
-          ? test.questions.length
-          : 0;
+  const displayQuestionCount = Array.isArray(test?.questions) ? test.questions.length : 0;
 
   if (!test || displayQuestionCount === 0) {
     return (
