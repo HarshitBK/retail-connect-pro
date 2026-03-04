@@ -28,7 +28,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-// AI generation now uses the Supabase edge function directly
+import { aiTestApi } from "@/lib/aiTestApi";
 
 interface Question {
   id: string;
@@ -109,34 +109,16 @@ const CreateTest = () => {
       const buf = await generatorFile.arrayBuffer();
       const fileBase64 = arrayBufferToBase64(buf);
 
-      // Use the Supabase edge function instead of local server
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      
-      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-skill-test-mcqs`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({
-          testName: testData.title,
-          description: testData.description,
-          role: testData.position,
-          fileName: generatorFile.name,
-          mimeType: generatorFile.type,
-          fileBase64,
-          count: aiQuestionCount,
-        }),
+      const data = await aiTestApi.generateMcqs({
+        testName: testData.title,
+        description: testData.description,
+        role: testData.position,
+        fileName: generatorFile.name,
+        mimeType: generatorFile.type,
+        fileBase64,
+        count: aiQuestionCount,
       });
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData?.error || "Failed to generate questions.");
-      }
-
-      const data = await res.json();
       const generated: GeneratedMcq[] = Array.isArray(data?.questions) ? data.questions : [];
       if (generated.length === 0) throw new Error("AI returned no questions.");
 
