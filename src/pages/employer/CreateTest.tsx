@@ -28,7 +28,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { aiTestApi } from "@/lib/aiTestApi";
+// AI generation now uses the Supabase edge function directly
 
 interface Question {
   id: string;
@@ -107,15 +107,36 @@ const CreateTest = () => {
     setGenerating(true);
     try {
       const buf = await generatorFile.arrayBuffer();
-      const data = await aiTestApi.generateMcqs({
-        testName: testData.title,
-        description: testData.description,
-        role: testData.position,
-        fileName: generatorFile.name,
-        mimeType: generatorFile.type,
-        fileBase64: arrayBufferToBase64(buf),
-        count: aiQuestionCount,
+      const fileBase64 = arrayBufferToBase64(buf);
+
+      // Use the Supabase edge function instead of local server
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-skill-test-mcqs`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({
+          testName: testData.title,
+          description: testData.description,
+          role: testData.position,
+          fileName: generatorFile.name,
+          mimeType: generatorFile.type,
+          fileBase64,
+          count: aiQuestionCount,
+        }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.error || "Failed to generate questions.");
+      }
+
+      const data = await res.json();
       const generated: GeneratedMcq[] = Array.isArray(data?.questions) ? data.questions : [];
       if (generated.length === 0) throw new Error("AI returned no questions.");
 
@@ -292,14 +313,7 @@ const CreateTest = () => {
 
       const createdTest = insertedTests?.[0];
 
-      if (createdTest) {
-        await aiTestApi.saveSnapshot(createdTest.id, {
-          employerId: employerProfile.id,
-          questionBank: questionBankPayload,
-          approvedQuestionIds: approvedIds,
-          questionsToShow: Math.min(Math.max(1, questionsToShow || 1), approvedIds.length),
-        });
-      }
+      // Snapshot saving removed - questions are stored directly in skill_tests.questions
 
       // Notify all employees about newly published tests
       if (createdTest && status === "published") {

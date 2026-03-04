@@ -7,10 +7,9 @@ import { AlertTriangle, Send, Paperclip, Video, Smile, Loader2, File, Eye } from
 import { useToast } from "@/hooks/use-toast";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
+import { supabase } from "@/integrations/supabase/client";
 
 const EMOJIS = ["😀", "😂", "👍", "❤️", "🔥", "🎉", "💼", "🤝", "🙏", "✅", "💡", "🚀"];
-
-const BASE = import.meta.env.VITE_AI_API_URL || "http://127.0.0.1:3001";
 
 interface ChatWidgetProps {
     isOpen: boolean;
@@ -23,13 +22,13 @@ interface ChatWidgetProps {
 }
 
 interface Message {
-    _id: string;
-    roomId: string;
-    senderId: string;
-    senderName: string;
+    id: string;
+    room_id: string;
+    sender_id: string;
+    sender_name: string;
     content: string;
-    attachmentUrl: string | null;
-    createdAt: string;
+    attachment_url: string | null;
+    created_at: string;
 }
 
 export function ChatWidget({ isOpen, onClose, roomId, recipientName, senderId, senderName, warningMessage }: ChatWidgetProps) {
@@ -42,11 +41,13 @@ export function ChatWidget({ isOpen, onClose, roomId, recipientName, senderId, s
 
     const fetchMessages = async () => {
         try {
-            const res = await fetch(`${BASE}/api/chat/${roomId}`);
-            if (res.ok) {
-                const data = await res.json();
-                setMessages(data);
-            }
+            const { data, error } = await supabase
+                .from("chat_messages")
+                .select("*")
+                .eq("room_id", roomId)
+                .order("created_at", { ascending: true });
+            if (error) throw error;
+            if (data) setMessages(data as Message[]);
         } catch (err) {
             console.error("Error fetching messages:", err);
         }
@@ -55,8 +56,26 @@ export function ChatWidget({ isOpen, onClose, roomId, recipientName, senderId, s
     useEffect(() => {
         if (isOpen && roomId) {
             fetchMessages();
-            const interval = setInterval(fetchMessages, 3000);
-            return () => clearInterval(interval);
+
+            // Subscribe to realtime
+            const channel = supabase
+                .channel(`chat-${roomId}`)
+                .on(
+                    "postgres_changes",
+                    { event: "INSERT", schema: "public", table: "chat_messages", filter: `room_id=eq.${roomId}` },
+                    (payload) => {
+                        const newMsg = payload.new as Message;
+                        setMessages((prev) => {
+                            if (prev.some(m => m.id === newMsg.id)) return prev;
+                            return [...prev, newMsg];
+                        });
+                    }
+                )
+                .subscribe();
+
+            return () => {
+                supabase.removeChannel(channel);
+            };
         }
     }, [isOpen, roomId]);
 
@@ -70,21 +89,18 @@ export function ChatWidget({ isOpen, onClose, roomId, recipientName, senderId, s
         if (!content.trim() && !attachmentUrl) return;
         try {
             setLoading(true);
-            const res = await fetch(`${BASE}/api/chat/send`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ roomId, senderId, senderName, content, attachmentUrl }),
+            const { error } = await supabase.from("chat_messages").insert({
+                room_id: roomId,
+                sender_id: senderId,
+                sender_name: senderName,
+                content,
+                attachment_url: attachmentUrl,
             });
-            if (res.ok) {
-                const newMsg = await res.json();
-                setMessages((prev) => [...prev, newMsg]);
-                setInputMsg("");
-            } else {
-                toast({ title: "Failed to send message", variant: "destructive" });
-            }
+            if (error) throw error;
+            setInputMsg("");
         } catch (err) {
             console.error(err);
-            toast({ title: "Error", description: "Communication error", variant: "destructive" });
+            toast({ title: "Failed to send message", variant: "destructive" });
         } finally {
             setLoading(false);
         }
@@ -108,16 +124,20 @@ export function ChatWidget({ isOpen, onClose, roomId, recipientName, senderId, s
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
-
-        // Simulating upload for now. In a real scenario, upload to Supabase Storage and get URL
         setUploading(true);
-        setTimeout(() => {
-            // Create a fake object URL for demonstration, usually you upload and get the public URL here
-            const fakeUrl = URL.createObjectURL(file);
-            sendMessage(`Attached a file: ${file.name}`, fakeUrl);
-            setUploading(false);
+        try {
+            const filePath = `chat/${roomId}/${Date.now()}_${file.name}`;
+            const { error: uploadError } = await supabase.storage.from("documents").upload(filePath, file);
+            if (uploadError) throw uploadError;
+            const { data: urlData } = supabase.storage.from("documents").getPublicUrl(filePath);
+            await sendMessage(`Attached: ${file.name}`, urlData.publicUrl);
             toast({ title: "File uploaded successfully!" });
-        }, 1500);
+        } catch (err) {
+            console.error(err);
+            toast({ title: "Upload failed", variant: "destructive" });
+        } finally {
+            setUploading(false);
+        }
     };
 
     const startVideoCall = () => {
@@ -133,9 +153,9 @@ export function ChatWidget({ isOpen, onClose, roomId, recipientName, senderId, s
                         <div>
                             <DialogTitle className="flex items-center gap-2">
                                 Chat with {recipientName}
-                                <Badge variant="outline" className="bg-success/10 text-success border-success/20">Active</Badge>
+                                <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/20">Active</Badge>
                             </DialogTitle>
-                            <DialogDescription className="text-xs flex items-center mt-1 text-warning font-medium">
+                            <DialogDescription className="text-xs flex items-center mt-1 text-yellow-600 font-medium">
                                 <AlertTriangle className="w-3 h-3 mr-1" />
                                 {warningMessage}
                             </DialogDescription>
@@ -155,17 +175,17 @@ export function ChatWidget({ isOpen, onClose, roomId, recipientName, senderId, s
                             </div>
                         ) : (
                             messages.map((m) => {
-                                const isMe = m.senderId === senderId;
+                                const isMe = m.sender_id === senderId;
                                 return (
-                                    <div key={m._id} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-                                        <span className="text-[10px] text-muted-foreground mb-1 ml-1">{isMe ? "You" : m.senderName}</span>
+                                    <div key={m.id} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
+                                        <span className="text-[10px] text-muted-foreground mb-1 ml-1">{isMe ? "You" : m.sender_name}</span>
                                         <div
                                             className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${isMe ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted text-foreground rounded-tl-sm"
                                                 }`}
                                         >
                                             {m.content}
-                                            {m.attachmentUrl && (
-                                                <a href={m.attachmentUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 mt-2 text-xs opacity-90 hover:opacity-100 bg-black/10 p-1.5 rounded-md">
+                                            {m.attachment_url && (
+                                                <a href={m.attachment_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 mt-2 text-xs opacity-90 hover:opacity-100 bg-black/10 p-1.5 rounded-md">
                                                     <File className="w-3 h-3" />
                                                     <span className="truncate max-w-[120px]">View Attachment</span>
                                                     <Eye className="w-3 h-3 ml-auto" />
@@ -173,7 +193,7 @@ export function ChatWidget({ isOpen, onClose, roomId, recipientName, senderId, s
                                             )}
                                         </div>
                                         <span className="text-[10px] text-muted-foreground mt-1 mr-1">
-                                            {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </span>
                                     </div>
                                 );

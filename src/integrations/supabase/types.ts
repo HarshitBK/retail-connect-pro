@@ -119,6 +119,36 @@ export type Database = {
         }
         Relationships: []
       }
+      chat_messages: {
+        Row: {
+          attachment_url: string | null
+          content: string
+          created_at: string
+          id: string
+          room_id: string
+          sender_id: string
+          sender_name: string
+        }
+        Insert: {
+          attachment_url?: string | null
+          content?: string
+          created_at?: string
+          id?: string
+          room_id: string
+          sender_id: string
+          sender_name: string
+        }
+        Update: {
+          attachment_url?: string | null
+          content?: string
+          created_at?: string
+          id?: string
+          room_id?: string
+          sender_id?: string
+          sender_name?: string
+        }
+        Relationships: []
+      }
       course_enrollments: {
         Row: {
           certificate_url: string | null

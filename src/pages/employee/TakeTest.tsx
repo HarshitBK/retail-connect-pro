@@ -17,7 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import type { Database } from "@/integrations/supabase/types";
-import { aiTestApi } from "@/lib/aiTestApi";
+// aiTestApi removed - all logic now uses Supabase directly
 
 interface Question {
   id: number;
@@ -260,13 +260,7 @@ const TakeTest = () => {
       const attemptIdVal = attemptData.id;
       setAttemptId(attemptIdVal);
 
-      let delivered: StoredQuestion[];
-      try {
-        const result = await aiTestApi.startAttempt(testId, attemptIdVal);
-        delivered = Array.isArray(result.deliveredQuestions) ? result.deliveredQuestions : [];
-      } catch {
-        delivered = buildDeliveredQuestions(testRow as Database["public"]["Tables"]["skill_tests"]["Row"]);
-      }
+      const delivered = buildDeliveredQuestions(testRow as Database["public"]["Tables"]["skill_tests"]["Row"]);
       if (delivered.length === 0) throw new Error("This test has no questions configured.");
 
       const parsedQuestions = delivered.map((q: StoredQuestion, i: number) => ({
@@ -448,9 +442,19 @@ const TakeTest = () => {
                   </div>
                 )}
 
-                <Button variant="default" className="w-full" size="lg" onClick={startTest}>
-                  Start Test Now
-                </Button>
+                {!mediaGranted ? (
+                  <Button variant="default" className="w-full" size="lg" onClick={handleEnableMedia} disabled={checkingMedia}>
+                    {checkingMedia ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Checking Camera & Mic...</>
+                    ) : (
+                      <><Video className="w-4 h-4 mr-2" /> Enable Camera & Microphone</>
+                    )}
+                  </Button>
+                ) : (
+                  <Button variant="default" className="w-full" size="lg" onClick={async () => { await requestFullscreen(); startTest(); }}>
+                    Start Test Now
+                  </Button>
+                )}
               </CardContent>
             </Card>
           </div>
