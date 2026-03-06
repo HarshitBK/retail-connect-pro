@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      call_signals: {
+        Row: {
+          callee_id: string
+          caller_id: string
+          caller_name: string
+          created_at: string
+          ended_at: string | null
+          id: string
+          room_id: string
+          status: string
+        }
+        Insert: {
+          callee_id: string
+          caller_id: string
+          caller_name: string
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          room_id: string
+          status?: string
+        }
+        Update: {
+          callee_id?: string
+          caller_id?: string
+          caller_name?: string
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          room_id?: string
+          status?: string
+        }
+        Relationships: []
+      }
       candidate_reservations: {
         Row: {
           created_at: string | null
