@@ -1,19 +1,12 @@
 
-// Supabase Edge Function: Generate MCQs from PDF/PPTX using an AI API.
+// Supabase Edge Function: Generate MCQs from PDF/PPTX using Lovable AI Gateway (Gemini).
+// Sends the file as base64 to Gemini's multimodal API for text extraction + MCQ generation.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import JSZip from "npm:jszip@3.10.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-type Mcq = {
-  id: string;
-  question: string;
-  options: string[];
-  correctAnswer: number;
 };
 
 function jsonResponse(body: unknown, init?: ResponseInit) {
@@ -25,65 +18,6 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
       ...(init?.headers ?? {}),
     },
   });
-}
-
-function base64ToUint8Array(base64: string): Uint8Array {
-  const cleaned = base64.replace(/^data:.*;base64,/, "");
-  const bin = atob(cleaned);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
-}
-
-async function extractTextFromPptx(bytes: Uint8Array): Promise<string> {
-  try {
-    const zip = await JSZip.loadAsync(bytes);
-    const slideXmlFiles = Object.keys(zip.files)
-      .filter((p) => /^ppt\/slides\/slide\d+\.xml$/i.test(p))
-      .sort((a, b) => {
-        const an = parseInt(a.match(/slide(\d+)\.xml/i)?.[1] ?? "0", 10);
-        const bn = parseInt(b.match(/slide(\d+)\.xml/i)?.[1] ?? "0", 10);
-        return an - bn;
-      });
-
-    const texts: string[] = [];
-    for (const path of slideXmlFiles) {
-      const xml = await zip.files[path].async("string");
-      const matches = [...xml.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)];
-      for (const m of matches) {
-        texts.push(m[1] ?? "");
-      }
-      texts.push("\n");
-    }
-    return texts.join(" ").replace(/\s+/g, " ").trim();
-  } catch (err) {
-    console.error("PPTX Error:", err);
-    throw new Error("Failed to extract text from PPTX file.");
-  }
-}
-
-async function extractTextFromPdf(bytes: Uint8Array): Promise<string> {
-  try {
-    // Note: pdfjs-dist can be heavy. Ensure Deno can handle it or use a simpler lib if needed.
-    const pdfjs = await import("npm:pdfjs-dist@4.10.38/legacy/build/pdf.mjs");
-    // @ts-ignore: standard pdfjs worker setup
-    pdfjs.GlobalWorkerOptions.workerSrc = undefined;
-
-    const loadingTask = pdfjs.getDocument({ data: bytes });
-    const pdf = await loadingTask.promise;
-    let fullText = "";
-    for (let p = 1; p <= pdf.numPages; p++) {
-      const page = await pdf.getPage(p);
-      const content = await page.getTextContent();
-      // @ts-ignore: pdfjs items
-      const strings = content.items.map((it: any) => it.str);
-      fullText += strings.join(" ") + "\n";
-    }
-    return fullText.replace(/\s+/g, " ").trim();
-  } catch (err) {
-    console.error("PDF Error:", err);
-    throw new Error("Failed to extract text from PDF file. Make sure it's not password protected.");
-  }
 }
 
 serve(async (req) => {
@@ -98,67 +32,111 @@ serve(async (req) => {
       return jsonResponse({ error: "No file content provided." }, { status: 400 });
     }
 
-    const bytes = base64ToUint8Array(fileBase64);
-    const ext = fileName.toLowerCase().split('.').pop();
-
-    let sourceText = "";
-    if (ext === "pptx" || mimeType.includes("presentation")) {
-      sourceText = await extractTextFromPptx(bytes);
-    } else if (ext === "pdf" || mimeType.includes("pdf")) {
-      sourceText = await extractTextFromPdf(bytes);
-    } else {
-      return jsonResponse({ error: "Unsupported file type. Use PDF or PPTX." }, { status: 400 });
-    }
-
-    if (!sourceText || sourceText.length < 50) {
-      return jsonResponse({ error: "Extracted text is too short to generate a meaningful test." }, { status: 400 });
-    }
-
-    const apiKey = Deno.env.get("OPENAI_API_KEY");
+    const apiKey = Deno.env.get("LOVABLE_API_KEY");
     if (!apiKey) {
-      return jsonResponse({ error: "OpenAI API Key not configured in Edge Functions." }, { status: 500 });
+      return jsonResponse({ error: "AI API Key not configured." }, { status: 500 });
     }
 
-    const prompt = `
-      You are an expert assessment designer. 
-      Create exactly ${count} multiple-choice questions for a candidate apply for the role of "${role}".
-      The test is named "${testName}" with description: "${description}".
-      
-      Requirements:
-      - Use the following source material content.
-      - Each question must have exactly 4 options.
-      - Only one correct answer (index 0-3).
-      - Format: Return ONLY a JSON object with a "questions" array.
-      - Each question object: { "id": "uuid", "question": "...", "options": ["...", "...", "...", "..."], "correctAnswer": index }
+    // Clean base64 - remove data URI prefix if present
+    const cleanBase64 = fileBase64.replace(/^data:.*;base64,/, "");
 
-      Source material:
-      ${sourceText.substring(0, 15000)}
-    `;
+    const prompt = `You are an expert assessment designer.
 
-    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+Analyze the attached document and create exactly ${count} multiple-choice questions for a candidate applying for the role of "${role}".
+The test is named "${testName}" with description: "${description || 'N/A'}".
+
+Requirements:
+- Derive questions from the document content.
+- Each question must have exactly 4 options.
+- Exactly one option must be correct (index 0-3).
+- Keep options concise and unambiguous.
+- Avoid trick questions and "All of the above"/"None of the above".
+- Each question must have a unique UUID as id.
+- Return ONLY a valid JSON object with this exact structure:
+{
+  "questions": [
+    { "id": "<uuid>", "question": "<string>", "options": ["A","B","C","D"], "correctAnswer": 0 }
+  ]
+}`;
+
+    // Determine mime type for the file
+    let fileMime = mimeType || "application/pdf";
+    const ext = fileName?.toLowerCase().split('.').pop();
+    if (ext === "pptx") {
+      fileMime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    } else if (ext === "pdf") {
+      fileMime = "application/pdf";
+    }
+
+    // Use Gemini via Lovable AI Gateway with file as inline data
+    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-3.5-turbo-1106", // or gpt-4-1106-preview
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
+        model: "google/gemini-2.5-flash",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${fileMime};base64,${cleanBase64}`,
+                },
+              },
+            ],
+          },
+        ],
         temperature: 0.7,
       }),
     });
 
     if (!aiResponse.ok) {
       const errText = await aiResponse.text();
-      console.error("OpenAI Error:", errText);
-      return jsonResponse({ error: "OpenAI API returned an error." }, { status: 502 });
+      console.error("AI Gateway Error:", errText);
+      return jsonResponse({ error: "AI service returned an error. Please try again." }, { status: 502 });
     }
 
     const aiData = await aiResponse.json();
-    const result = JSON.parse(aiData.choices[0].message.content);
+    const content = aiData.choices?.[0]?.message?.content;
+    
+    if (!content) {
+      console.error("Empty AI response:", JSON.stringify(aiData));
+      return jsonResponse({ error: "AI returned empty response. Try a different document." }, { status: 502 });
+    }
 
-    return jsonResponse({ questions: result.questions });
+    // Parse JSON from response - handle markdown code blocks
+    let jsonStr = content.trim();
+    if (jsonStr.startsWith("```")) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+    }
+
+    const result = JSON.parse(jsonStr);
+
+    if (!result?.questions || !Array.isArray(result.questions)) {
+      console.error("Invalid AI response structure:", content);
+      return jsonResponse({ error: "AI did not return valid questions. Please try again." }, { status: 502 });
+    }
+
+    // Validate and clean questions
+    const cleanedQuestions = result.questions
+      .filter((q: any) => q?.question && Array.isArray(q?.options) && q.options.length === 4)
+      .map((q: any) => ({
+        id: q.id || crypto.randomUUID(),
+        question: q.question,
+        options: q.options.map((o: any) => String(o)),
+        correctAnswer: typeof q.correctAnswer === "number" ? q.correctAnswer : 0,
+      }));
+
+    if (cleanedQuestions.length === 0) {
+      return jsonResponse({ error: "AI could not generate valid questions from this document." }, { status: 502 });
+    }
+
+    return jsonResponse({ questions: cleanedQuestions });
   } catch (error: any) {
     console.error("Function Error:", error);
     return jsonResponse({ error: error.message || "Internal Server Error" }, { status: 500 });
