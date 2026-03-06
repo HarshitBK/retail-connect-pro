@@ -3,11 +3,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Send, Paperclip, Video, Smile, Loader2, File, Eye, MoreVertical, Share2, CheckCheck } from "lucide-react";
+import { Send, Paperclip, Video, Smile, Loader2, File, Eye, MoreVertical, Share2, CheckCheck, Phone, PhoneOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { supabase } from "@/integrations/supabase/client";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { VideoCall } from "./VideoCall";
 
 const EMOJIS = ["😀", "😂", "👍", "❤️", "🔥", "🎉", "💼", "🤝", "🙏", "✅", "💡", "🚀"];
 
@@ -36,6 +37,9 @@ export function ChatWidget({ isOpen, onClose, roomId, recipientName, senderId, s
     const [inputMsg, setInputMsg] = useState("");
     const [loading, setLoading] = useState(false);
     const [uploading, setUploading] = useState(false);
+    const [callState, setCallState] = useState<"idle" | "calling" | "in-call">("idle");
+    const [activeCallId, setActiveCallId] = useState<string | null>(null);
+    const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const { toast } = useToast();
 
@@ -175,15 +179,154 @@ export function ChatWidget({ isOpen, onClose, roomId, recipientName, senderId, s
         }
     };
 
-    const startVideoCall = () => {
-        const meetUrl = `https://meet.jit.si/RetailConnect-${roomId}`;
-        window.open(meetUrl, "_blank", "noopener,noreferrer");
-        sendMessage(`🎬 Join my video call: ${meetUrl}`);
+    // Resolve callee_id from reservation/hired record
+    const resolveCalleeId = async (): Promise<string | null> => {
+        // Check candidate_reservations
+        const { data: res } = await supabase
+            .from("candidate_reservations")
+            .select("employer_id, employee_id, employer_profiles!inner(user_id), employee_profiles:employee_profiles!inner(user_id)")
+            .eq("id", roomId)
+            .maybeSingle();
+
+        if (res) {
+            const empUserId = (res as any).employer_profiles?.user_id;
+            const eeUserId = (res as any).employee_profiles?.user_id;
+            return senderId === empUserId ? eeUserId : empUserId;
+        }
+
+        // Check hired_candidates
+        const { data: hired } = await supabase
+            .from("hired_candidates")
+            .select("employer_id, employee_id, employer_profiles!inner(user_id), employee_profiles:employee_profiles!inner(user_id)")
+            .or(`id.eq.${roomId},reservation_id.eq.${roomId}`)
+            .maybeSingle();
+
+        if (hired) {
+            const empUserId = (hired as any).employer_profiles?.user_id;
+            const eeUserId = (hired as any).employee_profiles?.user_id;
+            return senderId === empUserId ? eeUserId : empUserId;
+        }
+
+        return null;
     };
+
+    const startVideoCall = async () => {
+        const calleeId = await resolveCalleeId();
+        if (!calleeId) {
+            toast({ title: "Cannot start call", description: "Could not find recipient", variant: "destructive" });
+            return;
+        }
+
+        setCallState("calling");
+
+        const { data: signal, error } = await supabase
+            .from("call_signals")
+            .insert({
+                room_id: roomId,
+                caller_id: senderId,
+                caller_name: senderName,
+                callee_id: calleeId,
+                status: "ringing",
+            })
+            .select()
+            .single();
+
+        if (error || !signal) {
+            toast({ title: "Call failed", variant: "destructive" });
+            setCallState("idle");
+            return;
+        }
+
+        setActiveCallId(signal.id);
+
+        // Insert notification for callee
+        await supabase.from("notifications").insert({
+            user_id: calleeId,
+            title: "Incoming Video Call",
+            message: `Incoming video call from ${senderName}`,
+            type: "call",
+        });
+
+        sendMessage(`📞 Started a video call`);
+
+        // Listen for accept/decline
+        const ch = supabase
+            .channel(`call-${signal.id}`)
+            .on("postgres_changes", {
+                event: "UPDATE",
+                schema: "public",
+                table: "call_signals",
+                filter: `id=eq.${signal.id}`,
+            }, (payload) => {
+                const updated = payload.new as any;
+                if (updated.status === "accepted") {
+                    setCallState("in-call");
+                    supabase.removeChannel(ch);
+                } else if (updated.status === "declined" || updated.status === "ended") {
+                    setCallState("idle");
+                    setActiveCallId(null);
+                    supabase.removeChannel(ch);
+                    if (updated.status === "declined") {
+                        toast({ title: "Call declined", description: `${recipientName} declined the call` });
+                    }
+                }
+            })
+            .subscribe();
+
+        // Auto-timeout after 30 seconds
+        callTimeoutRef.current = setTimeout(async () => {
+            setCallState("idle");
+            setActiveCallId(null);
+            await supabase
+                .from("call_signals")
+                .update({ status: "ended", ended_at: new Date().toISOString() })
+                .eq("id", signal.id);
+            supabase.removeChannel(ch);
+            toast({ title: "No answer", description: `${recipientName} didn't pick up` });
+        }, 30000);
+    };
+
+    const endCall = async () => {
+        if (callTimeoutRef.current) clearTimeout(callTimeoutRef.current);
+        if (activeCallId) {
+            await supabase
+                .from("call_signals")
+                .update({ status: "ended", ended_at: new Date().toISOString() })
+                .eq("id", activeCallId);
+        }
+        setCallState("idle");
+        setActiveCallId(null);
+    };
+
+    // Show full-screen video call when in-call
+    if (callState === "in-call") {
+        return (
+            <VideoCall
+                roomId={roomId}
+                displayName={senderName}
+                onEnd={endCall}
+            />
+        );
+    }
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
             <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden flex flex-col h-[700px] border-none shadow-2xl bg-background rounded-3xl">
+                {/* Calling overlay */}
+                {callState === "calling" && (
+                    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm gap-4">
+                        <Avatar className="h-20 w-20 border-4 border-primary/30 shadow-lg animate-pulse">
+                            <AvatarFallback className="bg-primary/10 text-primary text-2xl font-bold uppercase">
+                                {recipientName.substring(0, 2)}
+                            </AvatarFallback>
+                        </Avatar>
+                        <p className="text-lg font-semibold">Calling {recipientName}...</p>
+                        <p className="text-sm text-muted-foreground animate-pulse">Waiting for answer</p>
+                        <Button variant="destructive" size="icon" className="h-14 w-14 rounded-full mt-4" onClick={endCall}>
+                            <PhoneOff className="w-6 h-6" />
+                        </Button>
+                    </div>
+                )}
                 <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 via-transparent to-accent/5 pointer-events-none" />
 
                 <DialogHeader className="p-4 py-3 border-b bg-background/50 backdrop-blur-xl relative z-10 flex flex-row items-center justify-between gap-4">
